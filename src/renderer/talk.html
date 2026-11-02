@@ -101,6 +101,11 @@
     button:hover { border-color: var(--blue-soft); }
     button.go { color: #fff; border: 0; padding: 6px 16px; background: linear-gradient(135deg, var(--blue), var(--pink)); box-shadow: 0 3px 10px #5f7cf544; }
 
+    .copyrow { margin-top: 4px; }
+    button.mini { padding: 1px 10px; font-size: 11.5px; font-weight: 600; opacity: .7; }
+    button.mini:hover { opacity: 1; }
+    .reminder { font-weight: 700; font-size: 15px; text-align: center; padding: 4px 0; }
+    #composer.drop { background: linear-gradient(#f1f3ff, #f1f3ff) padding-box, linear-gradient(120deg, var(--blue), var(--pink)) border-box; }
     .codebox input { flex: 1; min-width: 0; padding: 6px 12px; border-radius: 999px; border: 2px solid var(--line); font: inherit; color: var(--ink); outline: none; }
     .codebox input:focus { border-color: var(--blue-soft); }
 
@@ -132,6 +137,7 @@
 </head>
 <body>
   <div id="tools" class="solid">
+    <button id="memoryBtn" title="기억 보기·고치기">기억</button>
     <button id="personaBtn" title="캐릭터 이름·말투·호칭 정하기">말투</button>
     <button id="histBtn" title="지난 대화">지난 대화</button>
     <button id="closeBtn" title="닫기 (Esc)">닫기</button>

@@ -929,6 +929,12 @@ function onAgentEvent(e) {
       playMotion();
       agentSay(AGENT.TEXT.error, 5000);
       break;
+    case 'reminder':   // 알림은 말 걸기 창이 열려 있어도 직접 말함
+      agentUi.quiet = false;
+      agentFace('done', 5000);
+      playMotion();
+      agentSay('⏰ ' + e.text, 15000);
+      break;
     case 'loginDone':
       if (e.ok) { agentFace('done', 3000); agentSay('로그인됐어요! 이제 말 걸어 주세요', 4000); }
       break;

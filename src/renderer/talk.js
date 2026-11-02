@@ -102,6 +102,21 @@ function addCodeBox() {
   field.focus();
 }
 
+// 답 아래 작은 복사 버튼
+function addCopyButton(text) {
+  const t = String(text || '').trim();
+  if (!t || t.length < 2) return;
+  const row = document.createElement('div');
+  row.className = 'row copyrow';
+  const b = document.createElement('button');
+  b.className = 'mini';
+  b.textContent = '복사';
+  b.onclick = () => { require('electron').clipboard.writeText(t); b.textContent = '복사했어요'; };
+  row.append(b);
+  replyText.append(row);
+  scrollEnd();
+}
+
 function setBusy(on) {
   busy = on;
   document.body.classList.toggle('busy', on);
@@ -178,7 +193,9 @@ ipcRenderer.on('agent-event', (ev, e) => {
       break;
     }
     case 'note': addNote(e.text, true); if (/로그인/.test(e.text)) addLoginButton(); break;
-    case 'done': setStatus(null); replyText.querySelector('.mutter')?.remove(); break;
+    case 'done': setStatus(null); replyText.querySelector('.mutter')?.remove(); addCopyButton(e.result); break;
+    case 'clipDone': addNote('📋 결과를 클립보드에 복사해 뒀어요 (⌘V)'); break;
+    case 'reminder': showReply(); replyText.innerHTML = ''; addNote(''); replyText.lastChild.className = 'reminder'; replyText.lastChild.textContent = '⏰ ' + e.text; break;
     case 'error':
       setStatus(null);
       replyText.querySelector('.mutter')?.remove();
@@ -221,23 +238,65 @@ ipcRenderer.on('talk-reset', (ev, { note } = {}) => {
 // 머리 위 / 옆
 ipcRenderer.on('talk-side', (ev, side) => document.body.classList.toggle('side-top', side === 'top'));
 
-// ---------- 말투(지침) ----------
-async function openPersona() {
-  $('personaText').value = await ipcRenderer.invoke('persona-get');
+// ---------- 말투(지침) / 기억 편집 (같은 칸을 같이 씀) ----------
+const PANELS = {
+  persona: {
+    title: '🗣 캐릭터 말투 · 지침',
+    help: '이름, 말투, 나를 부르는 호칭, 성격처럼 캐릭터가 지킬 것을 자유롭게 적어 주세요. 다음 대답부터 바로 적용돼요.',
+    get: 'persona-get', set: 'persona-set', saved: '말투를 저장했어요. 다음 대답부터 적용돼요.'
+  },
+  memory: {
+    title: '🧠 기억',
+    help: '지난 대화들을 짧게 압축해 둔 메모예요. 대화가 끝나면 중요한 것과 최근 일만 남기고 자동으로 정리돼요. 틀린 건 고치거나 지워도 돼요.',
+    get: 'memory-get', set: 'memory-set', saved: '기억을 고쳤어요. 새 대화부터 적용돼요.', placeholder: '아직 기억이 없어요. 대화를 나누면 다음에 켤 때 정리돼요.'
+  }
+};
+let panel = null;
+const personaPlaceholder = $('personaText').placeholder;
+async function openPanel(kind) {
+  panel = kind;
+  const P = PANELS[kind];
+  document.querySelector('#persona .p-title').textContent = P.title;
+  document.querySelector('#persona .p-help').textContent = P.help;
+  $('personaText').placeholder = P.placeholder || personaPlaceholder;
+  $('personaText').value = await ipcRenderer.invoke(P.get);
   document.body.classList.remove('show-history');
   document.body.classList.add('show-persona');
   $('personaText').focus();
 }
-function closePersona() { document.body.classList.remove('show-persona'); }
-ipcRenderer.on('talk-persona', () => { if (PART === 'reply') openPersona(); });
-$('personaBtn').onclick = () => (document.body.classList.contains('show-persona') ? closePersona() : openPersona());
-$('personaCancel').onclick = closePersona;
+function closePanel() { document.body.classList.remove('show-persona'); panel = null; }
+const togglePanel = (kind) => (panel === kind ? closePanel() : openPanel(kind));
+ipcRenderer.on('talk-persona', () => { if (PART === 'reply') openPanel('persona'); });
+ipcRenderer.on('talk-memory', () => { if (PART === 'reply') openPanel('memory'); });
+$('personaBtn').onclick = () => togglePanel('persona');
+$('memoryBtn').onclick = () => togglePanel('memory');
+$('personaCancel').onclick = closePanel;
 $('personaSave').onclick = async () => {
-  await ipcRenderer.invoke('persona-set', $('personaText').value);
-  closePersona();
+  const P = PANELS[panel];
+  await ipcRenderer.invoke(P.set, $('personaText').value);
+  closePanel();
   showReply();
-  addNote('말투를 저장했어요. 다음 대답부터 적용돼요.');
+  addNote(P.saved);
 };
+
+// ---------- 파일 끌어다 놓기 (입력칸) ----------
+if (PART === 'input') {
+  const { webUtils } = require('electron');
+  document.addEventListener('dragover', (e) => { e.preventDefault(); $('composer').classList.add('drop'); });
+  document.addEventListener('dragleave', () => $('composer').classList.remove('drop'));
+  document.addEventListener('drop', (e) => {
+    e.preventDefault();
+    $('composer').classList.remove('drop');
+    const paths = [...e.dataTransfer.files].map((f) => webUtils.getPathForFile(f)).filter(Boolean);
+    if (!paths.length) return;
+    ipcRenderer.send('talk-drop', paths);
+    const names = paths.map((p) => `"${p}"`).join(', ');
+    input.value = (input.value ? input.value + '\n' : '') + `이 파일 ${names} 보고 `;
+    autosize();
+    input.focus();
+    input.setSelectionRange(input.value.length, input.value.length);
+  });
+}
 
 ipcRenderer.on('talk-focus', () => { if (PART === 'input') input.focus(); });
 // 입력칸 창에서 보낸 말 → 말풍선 창이 이번 턴으로 기록

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, screen, dialog, shell, globalShortcut } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, screen, dialog, shell, globalShortcut, clipboard, Notification } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const tracker = require('./tracker');
@@ -10,6 +10,9 @@ const { startBridge } = require('./bridge');
 const { createStore } = require('./characters');
 const { createAgent, login } = require('./agent');
 const { checkForUpdate, startAutoUpdate, currentBuild } = require('./updater');
+const { createMemory } = require('./memory');
+const { createReminders } = require('./reminders');
+const { z } = require('zod');
 const { thumbnailUrl, customThumb, setCustomThumb } = require('./thumbs');
 const { FORMATS, importExtensions, importLabel } = require('../shared/formats');
 
@@ -779,8 +782,46 @@ function saveAgentConf() {
 const alive = (w) => w && !w.isDestroyed();
 const sendTalk = (ch, msg) => { for (const w of [talk.reply, talk.input]) if (alive(w)) w.webContents.send(ch, msg); };
 
+// 기억·알림은 앱이 준비된 뒤 만든다 (userData 경로가 필요)
+let memory = null, reminders = null;
+
+// 캐릭터 전용 도구: Claude 가 직접 부른다 (mcp__mascot__*)
+const textResult = (t) => ({ content: [{ type: 'text', text: t }] });
+function buildMascotTools(sdk) {
+  const { tool } = sdk;
+  return [
+    tool('set_reminder', '정해진 시간에 사용자에게 알림을 띄운다. 몇 분 뒤면 minutes, 시각이면 at("HH:MM" 또는 ISO 날짜시간), 매일이면 daily=true 와 at("HH:MM").',
+      { message: z.string().describe('알릴 내용 (캐릭터 말투로 짧게)'), minutes: z.number().optional(), at: z.string().optional(), daily: z.boolean().optional() },
+      async (a) => { try { const r = reminders.add(a); return textResult('맞췄어요: ' + reminders.describe(r)); } catch (e) { return textResult('실패: ' + e.message); } }),
+    tool('list_reminders', '맞춰 둔 알림 목록을 본다.', {},
+      async () => textResult(reminders.list().map(reminders.describe).join('\n') || '맞춰 둔 알림이 없어요')),
+    tool('cancel_reminder', '알림을 취소한다 (list_reminders 의 #번호).', { id: z.number() },
+      async ({ id }) => textResult(reminders.cancel(id) ? `#${id} 알림을 취소했어요` : `#${id} 알림이 없어요`)),
+    tool('remember', '사용자에 대해 오래 기억할 사실을 장기 기억에 적는다 (이름·호칭·취향·하는 일 등). 짧은 한 문장.',
+      { fact: z.string() },
+      async ({ fact }) => { memory.remember(fact); return textResult('기억해 뒀어요'); })
+  ];
+}
+
+function fireReminder(r) {
+  const text = r.text;
+  primaryMascot()?.win.webContents.send('agent-event', { type: 'reminder', text });
+  sendTalk('agent-event', { type: 'reminder', text });
+  if (Notification.isSupported()) new Notification({ title: '⏰ 알림', body: text, silent: false }).show();
+  bridge?.broadcast?.({ type: 'reminder', payload: { text } });
+}
+
 const agent = createAgent({
   getOptions: () => agentConf,
+  getMemory: () => memory?.read() || '',
+  buildTools: buildMascotTools,
+  onTurn: (user, result, meta = {}) => {
+    if (meta.clip) {   // 클립보드 번역·다듬기: 결과를 클립보드에 넣어 둠
+      clipboard.writeText(result.trim());
+      sendTalk('agent-event', { type: 'clipDone' });
+    }
+    if (!meta.noMemory) memory?.recordTurn(meta.label || user, result);
+  },
   onEvent: (e) => {
     const talkOpen = (alive(talk.input) && talk.input.isVisible()) || (alive(talk.reply) && talk.reply.isVisible());
     sendTalk('agent-event', e);
@@ -894,7 +935,33 @@ setInterval(() => { if ((alive(talk.input) && talk.input.isVisible()) || (alive(
 
 function startTalk() {
   agentConf = loadAgentConf();
-  if (!globalShortcut.register(TALK_SHORTCUT, toggleTalk)) console.warn('[talk] 단축키 등록 실패:', TALK_SHORTCUT);
+  memory = createMemory(path.join(app.getPath('userData'), 'memory'));
+  reminders = createReminders(path.join(app.getPath('userData'), 'reminders.json'), fireReminder);
+  // 지난번에 쌓인 대화를 압축해서 기억에 합침 (뒤에서 조용히)
+  setTimeout(() => memory.compress((p) => agent.summarize(p)).then((ok) => ok && console.log('[memory] 압축 완료')), 4000);
+  const keys = [
+    [TALK_SHORTCUT, toggleTalk],
+    [CLIP_KEYS.translate, () => clipAction('translate')],
+    [CLIP_KEYS.polish, () => clipAction('polish')]
+  ];
+  for (const [k, fn] of keys) if (!globalShortcut.register(k, fn)) console.warn('[talk] 단축키 등록 실패:', k);
+}
+
+// ===== 클립보드 번역·다듬기 =====
+const CLIP_KEYS = { translate: 'CommandOrControl+Shift+1', polish: 'CommandOrControl+Shift+2' };
+const CLIP_PROMPTS = {
+  translate: (t) => `아래 글을 번역해 주세요. 한국어면 자연스러운 영어로, 그 밖의 언어면 자연스러운 한국어로. 번역문만 출력하고 다른 말은 붙이지 마세요.\n\n${t}`,
+  polish: (t) => `아래 글을 뜻은 그대로 두고 자연스럽고 매끄럽게 다듬어 주세요. 원래 언어 그대로, 다듬은 글만 출력하고 다른 말은 붙이지 마세요.\n\n${t}`
+};
+async function clipAction(kind) {
+  const text = clipboard.readText().trim();
+  showTalk(false);
+  showReply(false);
+  if (!text) { sendTalk('agent-event', { type: 'note', text: '먼저 번역하거나 다듬을 글을 복사해 주세요 (⌘C)' }); return; }
+  if (agent.busy) { sendTalk('agent-event', { type: 'note', text: '지금 다른 일을 하는 중이에요. 끝나고 다시 눌러 주세요' }); return; }
+  const label = kind === 'translate' ? '📋 번역' : '📋 다듬기';
+  sendTalk('talk-user', `${label}: ${text.slice(0, 60)}${text.length > 60 ? '…' : ''}`);
+  agent.send(CLIP_PROMPTS[kind](text.slice(0, 8000)), { clip: true, noMemory: true, label }).catch((e) => sendTalk('agent-event', { type: 'error', message: e.message }));
 }
 
 async function changeWorkDir() {
@@ -917,6 +984,7 @@ function setModel(id) {
 function newConversation() {
   if (agent.busy) return;
   agent.reset();
+  memory?.compress((p) => agent.summarize(p));   // 지금까지 대화를 기억으로 정리
   sendTalk('talk-reset', { note: '새 대화를 시작해요' });
 }
 
@@ -936,6 +1004,10 @@ async function doLogin() {
   primaryMascot()?.win.webContents.send('agent-event', { type: 'loginDone', ok });
 }
 ipcMain.handle('persona-get', () => agentConf.persona);
+ipcMain.handle('memory-get', () => memory?.read() || '');
+ipcMain.handle('memory-set', (event, text) => { memory?.write(String(text || '').slice(0, 4000)); return true; });
+// 입력칸에 끌어다 놓은 파일: 묻지 않고 읽게 허락
+ipcMain.on('talk-drop', (event, paths) => { for (const p of paths || []) agent.allowRead(p); });
 ipcMain.handle('persona-set', (event, text) => { agentConf.persona = String(text || '').slice(0, 4000); saveAgentConf(); return true; });
 ipcMain.on('agent-login-code', (event, code) => loginRun?.sendCode(code));
 ipcMain.on('open-url', (event, url) => { if (/^https:\/\/[a-z0-9.-]*claude\.(ai|com)\//i.test(url)) shell.openExternal(url); });
@@ -951,6 +1023,11 @@ function claudeMenu() {
       { label: '모델', submenu: MODELS.map(([id, label]) => ({ label, type: 'radio', checked: agentConf.model === id, click: () => setModel(id) })) },
       { label: `📁 작업 폴더: ${path.basename(agentConf.cwd || '')}`, enabled: !agent.busy, click: changeWorkDir },
       { label: '📂 작업 폴더 열기', click: () => shell.openPath(agentConf.cwd) },
+      { type: 'separator' },
+      { label: `📋 클립보드 번역  (${process.platform === 'darwin' ? '⌘⇧1' : 'Ctrl+Shift+1'})`, click: () => clipAction('translate') },
+      { label: `📋 클립보드 다듬기  (${process.platform === 'darwin' ? '⌘⇧2' : 'Ctrl+Shift+2'})`, click: () => clipAction('polish') },
+      { label: '⏰ 알림 목록', click: () => { showTalk(true); showReply(false); sendTalk('agent-event', { type: 'note', text: reminders.list().map(reminders.describe).join('\n') || '맞춰 둔 알림이 없어요' }); } },
+      { label: '🧠 기억 보기·고치기', click: () => { showTalk(true); showReply(true); whenLoaded(talk.reply, () => talk.reply.webContents.send('talk-memory')); } },
       { type: 'separator' },
       { label: '🗣 캐릭터 말투(지침)', click: () => { showTalk(true); showReply(true); whenLoaded(talk.reply, () => talk.reply.webContents.send('talk-persona')); } },
       { label: '🔑 Claude 계정 로그인', click: doLogin }

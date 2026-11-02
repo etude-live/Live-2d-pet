@@ -36,16 +36,23 @@ function claudeExecutable() {
 }
 
 // 사용자가 적은 캐릭터 지침(이름·말투·호칭 등)을 기본 지침 뒤에 붙인다
-function personaPrompt(custom) {
+function personaPrompt(custom, memory) {
   const t = String(custom || '').trim();
-  if (!t) return PERSONA;
-  return PERSONA + '\n\n## 캐릭터 지침 (사용자가 정함. 말투·호칭·성격은 이 지침을 기본 지침보다 우선해서 따르세요)\n' + t;
+  let out = PERSONA;
+  if (t) out += '\n\n## 캐릭터 지침 (사용자가 정함. 말투·호칭·성격은 이 지침을 기본 지침보다 우선해서 따르세요)\n' + t;
+  const m = String(memory || '').trim();
+  if (m) out += '\n\n## 기억 (지난 대화들을 압축한 메모. 자연스럽게 활용하되, 메모에 없는 일은 지어내지 마세요)\n' + m;
+  return out;
 }
 
 const PERSONA = [
   '당신은 사용자의 데스크톱에 사는 Live2D 캐릭터이자, 실제로 일을 해 주는 코딩·작업 도우미입니다.',
   '사용자와는 한국어로, 밝고 다정한 반말이 아닌 존댓말(해요체)로 이야기하세요.',
-  '답변은 말풍선과 작은 채팅창에 표시되므로 짧고 또렷하게 쓰고, 긴 코드나 표는 꼭 필요할 때만 쓰세요.',
+  '답변은 캐릭터 머리 위 말풍선에 뜹니다. 메신저로 수다 떨듯이 보통 1~3문장으로 짧게 대답하세요.',
+  '목록·제목·표·굵은 글씨 같은 문서 서식은 쓰지 말고 말로 하세요. 사용자가 자세히 원하거나 결과물(번역문, 코드 등)을 달라고 할 때만 길게 쓰세요.',
+  '한 번에 다 설명하려 하지 말고, 더 궁금하면 물어보게 두세요.',
+  '사용자가 기억해 달라고 하거나 이름·취향처럼 오래 기억할 만한 걸 말하면 remember 도구로 적어 두세요.',
+  '알림·예약(“30분 뒤 알려 줘”, “매일 9시에”)은 set_reminder 도구로 맞추고, 몇 시에 알릴지 한 문장으로 확인해 주세요.',
   '파일을 고치거나 명령을 실행하기 전에는 무엇을 왜 하는지 한 문장으로 먼저 말하세요.',
   'Bash 도구의 description 은 반드시 한국어로, 컴퓨터를 잘 모르는 사람도 알 수 있게 "무엇을 확인/변경하는지" 짧게 쓰세요. (예: "Cloudflare에 로그인된 계정 확인")'
 ].join('\n');
@@ -82,7 +89,8 @@ function friendlyError(text) {
   return t;
 }
 
-function createAgent({ onEvent, getOptions }) {
+function createAgent({ onEvent, getOptions, getMemory = () => '', buildTools, onTurn }) {
+  const readable = new Set();   // 사용자가 끌어다 놓은 파일: 묻지 않고 읽기 허락
   let sessionId = null;
   let running = null;          // { abort, query }
   let seq = 0;
@@ -95,6 +103,8 @@ function createAgent({ onEvent, getOptions }) {
   async function canUseTool(toolName, input, { signal }) {
     // 읽기만 하는 명령·웹 검색은 묻지 않고 허락 (위험 신호가 하나라도 있으면 물어봄)
     let risk = null;
+    if (toolName.startsWith('mcp__mascot__')) return { behavior: 'allow', updatedInput: input };   // 캐릭터 전용 도구(알림·기억)
+    if (toolName === 'Read' && readable.has(path.resolve(String(input.file_path || '')))) return { behavior: 'allow', updatedInput: input };
     if (toolName === 'Bash') {
       risk = classifyCommand(input.command);
       if (risk.readOnly) return { behavior: 'allow', updatedInput: input };
@@ -145,6 +155,7 @@ function createAgent({ onEvent, getOptions }) {
         emit({ type: 'error', message: '중지했어요', stopped: true });
       } else if (msg.subtype === 'success' && !msg.is_error) {
         emit({ type: 'done', result: msg.result || '', cost: msg.total_cost_usd });
+        if (turn) try { onTurn?.(turn.text, msg.result || '', turn.meta); } catch (e) { console.warn('[agent] onTurn:', e.message); }
       } else {
         const why = (msg.errors && msg.errors.join('\n')) || msg.result || msg.subtype;
         emit({ type: 'error', message: friendlyError(why) });
@@ -178,7 +189,8 @@ function createAgent({ onEvent, getOptions }) {
   async function startLive() {
     const opts = getOptions();
     cwd = opts.cwd;
-    const { query } = await loadSdk();
+    const sdk = await loadSdk();
+    const { query } = sdk;
     const abort = new AbortController();
     const env = { ...process.env };
     if (opts.apiKey) env.ANTHROPIC_API_KEY = opts.apiKey;
@@ -193,7 +205,8 @@ function createAgent({ onEvent, getOptions }) {
         permissionMode: 'default',     // 모든 판단은 canUseTool 에서 (acceptEdits 는 작업 폴더 안의 rm·mv 같은 명령까지 묻지 않아서 쓰지 않음)
         canUseTool,
         thinking: { type: 'adaptive', display: 'summarized' },   // 혼잣말 재료
-        systemPrompt: { type: 'preset', preset: 'claude_code', append: personaPrompt(opts.persona) },
+        systemPrompt: { type: 'preset', preset: 'claude_code', append: personaPrompt(opts.persona, getMemory()) },
+        mcpServers: buildTools ? { mascot: sdk.createSdkMcpServer({ name: 'mascot', version: '1.0.0', alwaysLoad: true, tools: buildTools(sdk) }) } : undefined,
         settingSources: [],            // 이 컴퓨터의 Claude Code 설정(플러그인·MCP 등)은 불러오지 않음: 빠르고 예측 가능
         pathToClaudeCodeExecutable: claudeExecutable(),
         env
@@ -245,7 +258,7 @@ function createAgent({ onEvent, getOptions }) {
     } catch (e) { console.warn('[agent] 미리 켜기 실패:', e.message); }
   }
 
-  async function send(text) {
+  async function send(text, meta = {}) {
     if (running) throw new Error('이미 작업 중이에요');
     const opts = getOptions();
     if (!opts.cwd || !fs.existsSync(opts.cwd)) throw new Error('작업 폴더를 찾을 수 없어요');
@@ -273,7 +286,7 @@ function createAgent({ onEvent, getOptions }) {
         : '[알림: 사용자가 캐릭터 지침을 지웠어요. 이제 기본 말투로 대답하세요.]') + `\n\n[사용자 메시지]\n${text}`;
     }
     usedPersona = persona;
-    const done = new Promise((resolve) => { turn = { resolve, stopped: false }; });
+    const done = new Promise((resolve) => { turn = { resolve, stopped: false, text, meta }; });
     running = { live };
     live.input.push({ type: 'user', message: { role: 'user', content: prompt }, parent_tool_use_id: null });
     return done;
@@ -290,9 +303,36 @@ function createAgent({ onEvent, getOptions }) {
     }
   }
 
+  // 도구 없이 한 번만 묻기 (기억 압축용). 가벼운 Haiku 로
+  async function summarize(prompt) {
+    const opts = getOptions();
+    const { query } = await loadSdk();
+    const env = { ...process.env };
+    if (opts.apiKey) env.ANTHROPIC_API_KEY = opts.apiKey;
+    let result = '';
+    const q = query({
+      prompt,
+      options: {
+        cwd: opts.cwd,
+        model: 'claude-haiku-5-5',
+        tools: [],
+        maxTurns: 1,
+        systemPrompt: '당신은 대화 기록을 짧은 메모로 압축하는 도우미입니다. 요청한 형식의 메모만 출력합니다.',
+        settingSources: [],
+        persistSession: false,
+        pathToClaudeCodeExecutable: claudeExecutable(),
+        env
+      }
+    });
+    for await (const m of q) if (m.type === 'result') { if (m.subtype !== 'success') throw new Error(m.subtype); result = m.result || ''; }
+    return result;
+  }
+
   return {
     send,
     warm,
+    summarize,
+    allowRead(p) { readable.add(path.resolve(String(p))); },
     answer(id, allow) { pending.get(id)?.resolve(!!allow); },
     stop,
     reset() { if (!running) { closeLive(); sessionId = null; usedPersona = null; } },
