@@ -11,7 +11,8 @@
 //     done     result, cost       완료
 //     error    message            실패
 //     idle                         작업 끝(done/error 다음에 항상)
-// - 인증: apiKey 가 있으면 ANTHROPIC_API_KEY 로 넘기고, 없으면 이 컴퓨터의 Claude Code 로그인/환경을 쓴다.
+// - 인증: 기본은 이 컴퓨터의 Claude Code 로그인(Pro/Max 구독 포함)을 그대로 쓴다.
+//         apiKey 를 넣었을 때만 ANTHROPIC_API_KEY 로 넘긴다.
 const fs = require('fs');
 const path = require('path');
 
@@ -62,6 +63,16 @@ function summarizeInput(tool, input = {}, cwd = '') {
   }
 }
 
+// 로그인/인증 문제는 알아듣기 쉬운 안내로 바꾼다
+const LOGIN_HINT = 'Claude에 로그인되어 있지 않은 것 같아요. 터미널에서 claude 를 실행해 로그인(/login)한 뒤 다시 시켜 주세요.';
+function friendlyError(text) {
+  const t = String(text || '');
+  if (/invalid api key|authentication|unauthori[sz]ed|\b401\b|not logged in|please run \/login|oauth|credential/i.test(t)) return LOGIN_HINT;
+  if (/usage limit|rate limit|\b429\b|limit reached/i.test(t)) return '사용 한도에 걸렸어요. 조금 뒤에 다시 시켜 주세요. (' + t.slice(0, 120) + ')';
+  if (/ENOENT|spawn/i.test(t)) return 'Claude 실행 파일을 찾지 못했어요: ' + t.slice(0, 160);
+  return t;
+}
+
 function createAgent({ onEvent, getOptions }) {
   let sessionId = null;
   let running = null;          // { abort, query }
@@ -92,6 +103,9 @@ function createAgent({ onEvent, getOptions }) {
       sessionId = msg.session_id;
       return;
     }
+    if (msg.type === 'assistant' && msg.error && !msg.parent_tool_use_id) {
+      emit({ type: 'note', text: friendlyError(msg.error) });
+    }
     if (msg.type === 'assistant' && !msg.parent_tool_use_id) {
       for (const b of msg.message?.content || []) {
         if (b.type === 'thinking' && b.thinking) emit({ type: 'thought', text: b.thinking });
@@ -106,7 +120,7 @@ function createAgent({ onEvent, getOptions }) {
         emit({ type: 'done', result: msg.result || '', cost: msg.total_cost_usd });
       } else {
         const why = (msg.errors && msg.errors.join('\n')) || msg.result || msg.subtype;
-        emit({ type: 'error', message: String(why) });
+        emit({ type: 'error', message: friendlyError(why) });
       }
     }
   }
@@ -142,7 +156,7 @@ function createAgent({ onEvent, getOptions }) {
       for await (const msg of q) handleMessage(msg);
     } catch (e) {
       if (abort.signal.aborted) emit({ type: 'error', message: '중지했어요', stopped: true });
-      else emit({ type: 'error', message: e?.message || String(e) });
+      else emit({ type: 'error', message: friendlyError(e?.message || String(e)) });
     } finally {
       for (const p of pending.values()) p.resolve(false);
       pending.clear();

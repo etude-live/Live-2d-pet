@@ -27,8 +27,9 @@
 
 ### 인증
 
-- **API 키**: ⚙️ 에서 Anthropic API 키를 넣으면 그걸 씁니다(사용한 만큼 과금). 키는 OS 암호화 저장소(macOS 키체인)로 암호화해 `agent.json` 에 저장합니다.
-- 비워 두면 이 컴퓨터의 Claude Code 설정(`ANTHROPIC_API_KEY` 환경 변수 등)을 따릅니다.
+- **기본: 이 맥에서 로그인된 Claude Code 계정**(Pro/Max 구독 포함)을 그대로 씁니다. 한 번만 터미널에서 `claude` 를 실행해 로그인해 두면 됩니다. 사용량은 그 구독의 한도 안에서 쓰입니다.
+- API 키를 쓰고 싶으면 ⚙️ 에 넣습니다(사용한 만큼 과금). 키는 OS 암호화 저장소로 암호화해 저장하고, 키가 있으면 키를 먼저 씁니다.
+- 구독 로그인 사용은 본인 컴퓨터에서 본인 계정으로 쓰는 개인 용도를 전제로 합니다. 이 앱을 다른 사람에게 배포할 때는 API 키 방식을 안내하세요.
 
 설정 파일: `~/Library/Application Support/live2d-desktop-mascot/agent.json` (macOS)
 

@@ -30,7 +30,7 @@ function showState(st) {
   $('folder').textContent = st.cwd ? '📁 ' + st.cwd.split(/[\\/]/).filter(Boolean).pop() : '📁 작업 폴더 고르기';
   $('folder').title = st.cwd || '작업 폴더 고르기';
   $('model').value = st.model || '';
-  $('keyState').textContent = st.hasKey ? 'API 키가 저장되어 있어요 (지우려면 칸을 비우고 Enter).' : 'API 키 없음: 이 컴퓨터의 Claude Code 설정을 따릅니다. (Finder로 켠 앱은 터미널 환경 변수를 못 읽으니 키를 넣어 두는 게 확실해요)';
+  $('keyState').textContent = st.hasKey ? 'API 키가 저장되어 있어요 (지우려면 칸을 비우고 Enter).' : 'API 키 없음: 이 맥에서 로그인된 Claude Code 계정(Pro 등)을 씁니다. 로그인은 터미널에서 claude 실행 → /login';
   setBusy(st.busy);
 }
 
@@ -83,6 +83,7 @@ ipcRenderer.on('agent-event', (ev, e) => {
     case 'done':
       note(typeof e.cost === 'number' ? `완료 · 이번 작업 약 $${e.cost.toFixed(4)}` : '완료');
       break;
+    case 'note': note(e.text, true); break;
     case 'error': note(e.stopped ? '중지했어요' : '⚠️ ' + e.message, !e.stopped); break;
     case 'idle': setBusy(false); input.focus(); break;
   }
