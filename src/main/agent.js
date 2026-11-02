@@ -133,7 +133,35 @@ function createAgent({ onEvent, getOptions, getMemory = () => '', buildTools, on
       : { behavior: 'deny', message: '사용자가 허락하지 않았어요. 다른 방법을 찾거나 사용자에게 물어보세요.' };
   }
 
+  // Pro/Max 사용량 (5시간·주간 한도). utilization 은 0~1 로 맞춘다
+  function emitUsage(windows) {
+    const out = {};
+    for (const [k, w] of Object.entries(windows || {})) {
+      if (!w || w.utilization == null) continue;
+      let u = Number(w.utilization);
+      if (u > 1.0001) u /= 100;   // 0~100 으로 오는 경우
+      const r = w.resetsAt ?? w.resets_at;
+      const resetsAt = typeof r === 'number' ? (r < 1e12 ? r * 1000 : r) : r ? Date.parse(r) : null;
+      out[k] = { utilization: u, resetsAt, status: w.status || null };
+    }
+    if (Object.keys(out).length) emit({ type: 'usage', windows: out });
+  }
+
+  async function refreshUsage() {
+    try {
+      const fn = live?.q?.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET;   // 실험용 API: 실패해도 무시
+      if (!fn) return;
+      const r = await fn.call(live.q, { skipBehaviors: true });
+      if (r?.rate_limits) emitUsage(r.rate_limits);
+    } catch { /* 대화할 때 오는 rate_limit_event 로 대신 */ }
+  }
+
   function handleMessage(msg) {
+    if (msg.type === 'rate_limit_event') {
+      const i = msg.rate_limit_info || {};
+      emitUsage(i.unifiedWindows || (i.rateLimitType ? { [i.rateLimitType]: i } : {}));
+      return;
+    }
     if (msg.type === 'system' && msg.subtype === 'init') {
       sessionId = msg.session_id;
       return;
@@ -213,6 +241,7 @@ function createAgent({ onEvent, getOptions, getMemory = () => '', buildTools, on
       }
     });
     const me = live = { q, input, abort, model: opts.model, cwd: opts.cwd, dead: false };
+    setTimeout(refreshUsage, 3000);
     usedPersona = String(opts.persona || '').trim();
     (async () => {
       try {
@@ -339,6 +368,7 @@ function createAgent({ onEvent, getOptions, getMemory = () => '', buildTools, on
     allowRead(p) { readable.add(path.resolve(String(p))); },
     answer(id, allow) { pending.get(id)?.resolve(!!allow); },
     stop,
+    refreshUsage,
     reset() { if (!running) { closeLive(); sessionId = null; usedPersona = null; } },
     close: closeLive,
     get busy() { return !!running; },

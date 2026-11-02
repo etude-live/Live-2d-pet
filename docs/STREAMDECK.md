@@ -52,6 +52,7 @@
 | `agent` | `{ state: "working" \| "asking" \| "idle" }` | 캐릭터(Claude)가 일 시작 / 사용자 승인 기다림 / 끝 |
 | `pomodoro` | `{ event, running, paused, phase, remainingSec, cycle, cycles, minutes: { work, break, long } }` | `event: "tick"` 은 타이머가 도는 동안 1초마다. 그 밖의 event: `work` `break` `long` `done` `stopped` `paused` `resumed` |
 | `reminder` | `{ text }` | 맞춰 둔 알림이 울릴 때 |
+| `usage` | `{ five_hour?: { utilization(0~1), resetsAt(ms), status }, seven_day?: {…}, … }` | Claude Pro/Max 사용량이 갱신될 때 (대화할 때마다) |
 | `pong` | | `{ "v":1, "type":"ping" }` 에 대한 답 |
 
 `phase`: `idle` / `work`(집중) / `break`(짧은 휴식) / `long`(긴 휴식).
@@ -76,7 +77,8 @@
 | `pomodoro.stop` | | 끝 | `state` |
 | `reminder.list` | | 알림 목록 | `reminders: [{ id, text, at(ms), daily("HH:MM"\|null) }]` |
 | `mascot.say` | `{ text }` | 캐릭터가 말풍선으로 말함 (Claude 안 씀, 토큰 0) | |
-| `state.get` | | 지금 상태 | `{ agent, pomodoro, build }` |
+| `state.get` | | 지금 상태 | `{ agent, pomodoro, usage, build }` |
+| `usage.get` | | 사용량 새로 가져오기 (가능하면) | `{ usage }` |
 
 ## 4. 터미널에서 시험
 
@@ -93,4 +95,5 @@ node scripts/bridge-send.js command '{"name":"screen.ask","args":{"question":"�
 - 📸 화면 질문: `screen.ask` (질문은 버튼 설정에서 고정 문구로, 예: "이 에러 뭐야?").
 - 🌐 번역 / ✍️ 다듬기: `clip.translate` / `clip.polish`.
 - ⏹ 멈추기: `agent.stop`.
+- 🔋 사용량: `usage` 상태를 받아 5시간 한도 %를 게이지로. 80% 넘으면 빨간색.
 - 💭 정해진 말: `talk.send` (버튼마다 문구 설정, 예: "오늘 할 일 정리해 줘").

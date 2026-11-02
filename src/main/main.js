@@ -829,6 +829,7 @@ const agent = createAgent({
     if (!meta.noMemory) memory?.recordTurn(meta.label || user, result);
   },
   onEvent: (e) => {
+    if (e.type === 'usage') { onUsage(e.windows); return; }
     const st = { start: 'working', permission: 'asking', permissionDone: 'working', idle: 'idle' }[e.type];
     if (st) bridge?.broadcast({ type: 'agent', payload: { state: st } });
     const talkOpen = (alive(talk.input) && talk.input.isVisible()) || (alive(talk.reply) && talk.reply.isVisible());
@@ -1036,6 +1037,8 @@ function claudeMenu() {
       { type: 'separator' },
       { label: `📋 클립보드 번역  (${process.platform === 'darwin' ? '⌘⇧1' : 'Ctrl+Shift+1'})`, click: () => clipAction('translate') },
       { label: `📋 클립보드 다듬기  (${process.platform === 'darwin' ? '⌘⇧2' : 'Ctrl+Shift+2'})`, click: () => clipAction('polish') },
+      { label: usageText() ? `${usageText()}  (${usage.five_hour?.resetsAt ? hhmm(usage.five_hour.resetsAt) + ' 리셋' : ''})` : '🔋 사용량: 대화하면 표시돼요', enabled: false },
+      { type: 'separator' },
       { label: `📸 화면 보고 도와줘  (${process.platform === 'darwin' ? '⌘⇧0' : 'Ctrl+Shift+0'})`, click: () => captureScreen() },
       { label: '🍅 포모도로 시작/끝', click: () => handleCommand({ name: 'pomodoro.toggle' }) },
       { label: '⏰ 알림 목록', click: () => { showTalk(true); showReply(false); sendTalk('agent-event', { type: 'note', text: reminders.list().map(reminders.describe).join('\n') || '맞춰 둔 알림이 없어요' }); } },
@@ -1069,10 +1072,51 @@ ipcMain.on('agent-stop', () => agent.stop());
 ipcMain.on('agent-login', () => doLogin());
 ipcMain.on('talk-hide', () => hideTalk());
 ipcMain.on('talk-ignore-mouse', (event, ignore) => BrowserWindow.fromWebContents(event.sender)?.setIgnoreMouseEvents(ignore, { forward: true }));
-ipcMain.handle('talk-state', () => ({ model: agentConf.model, cwd: agentConf.cwd, busy: agent.busy, shortcut: TALK_SHORTCUT }));
+ipcMain.handle('talk-state', () => ({ usage: usageText(), model: agentConf.model, cwd: agentConf.cwd, busy: agent.busy, shortcut: TALK_SHORTCUT }));
 // 캐릭터 더블클릭 / 승인 대기 중 클릭
 onMascot('agent-open', () => showTalk(true));
 onMascot('agent-answer', (m, { id, allow }) => agent.answer(id, allow));
+
+// ===== Pro/Max 사용량 표시 =====
+// 대화할 때마다 오는 5시간·주간 한도 사용률. 메뉴·메뉴바·말풍선·스트림덱에 보여 주고, 80%를 넘으면 한 번 알림
+const usageFile = () => path.join(app.getPath('userData'), 'usage.json');
+let usage = {};
+try { usage = JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'usage.json'), 'utf8')); } catch { usage = {}; }
+const warned = new Set();
+const pct = (w) => (w ? `${Math.round(w.utilization * 100)}%` : '?');
+const hhmm = (t) => { const d = new Date(t); return `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`; };
+const dayName = (t) => { const d = new Date(t); return `${d.getMonth() + 1}/${d.getDate()} ${hhmm(t)}`; };
+function usageText(long = false) {
+  const f = usage.five_hour, w = usage.seven_day;
+  if (!f && !w) return '';
+  let t = `🔋 5시간 ${pct(f)} · 주간 ${pct(w)}`;
+  if (long) {
+    if (f?.resetsAt) t += `\n5시간 한도 다시 채워짐: ${hhmm(f.resetsAt)}`;
+    if (w?.resetsAt) t += `\n주간 한도 다시 채워짐: ${dayName(w.resetsAt)}`;
+  }
+  return t;
+}
+function onUsage(windows) {
+  // 지난 창(이미 리셋된 것)은 버림
+  const now = Date.now();
+  usage = { ...Object.fromEntries(Object.entries(usage).filter(([, w]) => !w.resetsAt || w.resetsAt > now)), ...windows };
+  try { fs.writeFileSync(usageFile(), JSON.stringify(usage)); } catch { /* 무시 */ }
+  tray?.setToolTip(`Live2D Desktop Mascot\n${usageText(true)}`);
+  sendTalk('talk-usage', usageText());
+  bridge?.broadcast({ type: 'usage', payload: usage });
+  for (const [k, label] of [['five_hour', '5시간'], ['seven_day', '이번 주']]) {
+    const w = usage[k];
+    if (!w) continue;
+    for (const lim of [0.8, 0.95]) {
+      const key = `${k}:${lim}:${w.resetsAt}`;
+      if (w.utilization >= lim && !warned.has(key)) {
+        warned.add(key);
+        const when = w.resetsAt ? (k === 'five_hour' ? ` ${hhmm(w.resetsAt)}에 다시 채워져요.` : ` ${dayName(w.resetsAt)}에 다시 채워져요.`) : '';
+        mascotSay(lim < 0.9 ? `${label} 사용량이 ${pct(w)}예요. 조금 아껴 써요!${when}` : `${label} 사용량이 거의 다 찼어요 (${pct(w)}).${when}`);
+      }
+    }
+  }
+}
 
 // 캐릭터가 한마디 (토큰 안 씀)
 const mascotSay = (text) => primaryMascot()?.win.webContents.send('bridge-event', { type: 'say', payload: { text } });
@@ -1185,7 +1229,8 @@ async function handleCommand(payload = {}, client) {
       case 'pomodoro.skip': result = { ok: true, state: pomodoro.skip() }; break;
       case 'reminder.list': result = { ok: true, reminders: reminders.list().map((r) => ({ id: r.id, text: r.text, at: r.at, daily: r.daily })) }; break;
       case 'mascot.say': primaryMascot()?.win.webContents.send('bridge-event', { type: 'say', payload: { text: String(args.text || '') } }); result = { ok: true }; break;
-      case 'state.get': result = { ok: true, agent: agent.busy ? 'working' : 'idle', pomodoro: pomodoro.state(), build: currentBuild() }; break;
+      case 'state.get': result = { ok: true, agent: agent.busy ? 'working' : 'idle', pomodoro: pomodoro.state(), usage, build: currentBuild() }; break;
+      case 'usage.get': await agent.refreshUsage(); result = { ok: true, usage }; break;
       default: result = { ok: false, error: 'unknown-command' };
     }
   } catch (e) {

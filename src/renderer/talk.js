@@ -345,7 +345,12 @@ $('histBtn').onclick = () => {
   if (on) renderHistory();
 };
 
+// 사용량 (말풍선 위 작은 표시)
+const showUsage = (t) => { const u = $('usage'); if (u) { u.textContent = t || ''; u.style.display = t ? '' : 'none'; } };
+ipcRenderer.on('talk-usage', (ev, t) => showUsage(t));
+
 ipcRenderer.invoke('talk-state').then((st) => {
+  showUsage(st.usage);
   setBusy(st.busy);
   if (PART === 'input') input.focus();
 });
