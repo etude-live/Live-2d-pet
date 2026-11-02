@@ -85,6 +85,7 @@ function createAgent({ onEvent, getOptions }) {
   let running = null;          // { abort, query }
   let seq = 0;
   let cwd = '';
+  let usedPersona = null;   // 이 대화에 마지막으로 알려 준 캐릭터 지침
   const pending = new Map();   // id → { resolve, input }
 
   const emit = (e) => { try { onEvent(e); } catch (err) { console.error('[agent] onEvent:', err); } };
@@ -141,8 +142,17 @@ function createAgent({ onEvent, getOptions }) {
     const abort = new AbortController();
     const env = { ...process.env };
     if (opts.apiKey) env.ANTHROPIC_API_KEY = opts.apiKey;
+    // 이어지는 대화에서는 처음 지침이 계속 쓰이므로, 지침이 바뀌었으면 이번 메시지에 새 지침을 같이 알린다
+    const persona = String(opts.persona || '').trim();
+    let prompt = text;
+    if (sessionId && usedPersona !== null && persona !== usedPersona) {
+      prompt = (persona
+        ? `[알림: 사용자가 캐릭터 지침을 바꿨어요. 이전 말투·이름은 잊고, 지금부터는 아래 새 지침만 따르세요.]\n${persona}`
+        : '[알림: 사용자가 캐릭터 지침을 지웠어요. 이제 기본 말투로 대답하세요.]') + `\n\n[사용자 메시지]\n${text}`;
+    }
+    usedPersona = persona;
     const q = query({
-      prompt: text,
+      prompt,
       options: {
         cwd: opts.cwd,
         model: opts.model || undefined,
@@ -176,7 +186,7 @@ function createAgent({ onEvent, getOptions }) {
     send,
     answer(id, allow) { pending.get(id)?.resolve(!!allow); },
     stop() { running?.abort.abort(); },
-    reset() { if (!running) sessionId = null; },
+    reset() { if (!running) { sessionId = null; usedPersona = null; } },
     get busy() { return !!running; },
     get sessionId() { return sessionId; }
   };
