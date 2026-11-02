@@ -42,7 +42,7 @@
 { "v": 1, "type": "result", "payload": { "id": 7, "name": "pomodoro.toggle", "ok": true, "state": { … } }, "ts": … }
 ```
 
-실패: `{ "ok": false, "error": "busy" | "empty" | "unknown-command" | "screen-permission" | "capture-failed" | … }`
+실패: `{ "ok": false, "error": "claude-off" | "busy" | "empty" | "unknown-command" | "screen-permission" | "capture-failed" | … }`
 
 ### 받기: 상태 (모든 클라이언트에게 방송)
 
@@ -53,6 +53,7 @@
 | `pomodoro` | `{ event, running, paused, phase, remainingSec, cycle, cycles, minutes: { work, break, long } }` | `event: "tick"` 은 타이머가 도는 동안 1초마다. 그 밖의 event: `work` `break` `long` `done` `stopped` `paused` `resumed` |
 | `reminder` | `{ text }` | 맞춰 둔 알림이 울릴 때 |
 | `usage` | `{ five_hour?: { utilization(0~1), resetsAt(ms), status }, seven_day?: {…}, … }` | Claude Pro/Max 사용량이 갱신될 때 (대화할 때마다) |
+| `mode` | `{ claude }` | Claude 모드를 켜거나 껐을 때 |
 | `pong` | | `{ "v":1, "type":"ping" }` 에 대한 답 |
 
 `phase`: `idle` / `work`(집중) / `break`(짧은 휴식) / `long`(긴 휴식).
@@ -61,6 +62,8 @@
 
 | name | args | 하는 일 | 결과 |
 |---|---|---|---|
+| `mode.toggle` | | Claude 모드 켜기/끄기 (끄면 혼잣말 피규어) | `claude` (true/false) |
+| `mode.set` | `{ on }` | Claude 모드 켜기/끄기 | `claude` |
 | `talk.open` | | 말 걸기 입력칸 열기 | |
 | `talk.toggle` | | 열기/닫기 | |
 | `talk.hide` | | 닫기 | |
@@ -77,7 +80,7 @@
 | `pomodoro.stop` | | 끝 | `state` |
 | `reminder.list` | | 알림 목록 | `reminders: [{ id, text, at(ms), daily("HH:MM"\|null) }]` |
 | `mascot.say` | `{ text }` | 캐릭터가 말풍선으로 말함 (Claude 안 씀, 토큰 0) | |
-| `state.get` | | 지금 상태 | `{ agent, pomodoro, usage, build }` |
+| `state.get` | | 지금 상태 | `{ claude, agent, pomodoro, usage, build }` |
 | `usage.get` | | 사용량 새로 가져오기 (가능하면) | `{ usage }` |
 
 ## 4. 터미널에서 시험

@@ -252,12 +252,18 @@ function createTray() {
   if (process.platform === 'darwin') icon = icon.resize({ width: 18, height: 18 }); // メニューバー用
   tray = new Tray(icon);
   tray.setToolTip('Live2D Desktop Mascot');
+  refreshTrayMenu();
+  tray.on('double-click', toggleVisible);
+}
+
+function refreshTrayMenu() {
+  if (!tray) return;
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: '표시 / 숨기기', click: toggleVisible },
     { label: '위치 초기화', click: resetPosition },
     { type: 'separator' },
-    { label: '💬 Claude에게 말 걸기', click: () => showTalk(true) },
-    { label: '🤣 아재개그', click: () => primaryMascot()?.win.webContents.send('menu-action', { type: 'talk' }) },
+    modeItem(),
+    claudeOn() ? { label: '💬 Claude에게 말 걸기', click: () => showTalk(true) } : { label: '🤣 아재개그', click: () => primaryMascot()?.win.webContents.send('menu-action', { type: 'talk' }) },
     { label: '⚙️ 설정 열기', click: () => openSettingsWindow() },
     { label: '📜 크레딧', click: openCredits },
     { label: '📂 설정 폴더 열기', click: () => shell.openPath(app.getPath('userData')) },
@@ -265,7 +271,6 @@ function createTray() {
     { type: 'separator' },
     { label: '❌ 종료', click: () => app.quit() }
   ]));
-  tray.on('double-click', toggleVisible);
 }
 
 // 1体でも見えていれば全員隠す。全員隠れていれば全員出す
@@ -718,9 +723,9 @@ onMascot('show-context-menu', async (m) => {
   }
 
   const template = [
-    { label: '💬 Claude에게 말 걸기', click: () => showTalk(true) },
+    modeItem(),
+    ...(claudeOn() ? [{ label: '💬 Claude에게 말 걸기', click: () => showTalk(true) }] : [{ label: '🤣 아재개그', click: () => act('talk') }]),
     claudeMenu(),
-    { label: '🤣 아재개그', click: () => act('talk') },
     { type: 'separator' },
     { label: '👗 모델', submenu: modelItems },
     {
@@ -776,7 +781,7 @@ const defaultWorkDir = () => path.join(app.getPath('home'), 'Claude작업');
 function loadAgentConf() {
   let j = {};
   try { j = JSON.parse(fs.readFileSync(agentConfFile(), 'utf8')); } catch { /* 처음 */ }
-  const conf = { cwd: j.cwd && fs.existsSync(j.cwd) ? j.cwd : defaultWorkDir(), model: j.model || DEFAULT_MODEL, persona: typeof j.persona === 'string' ? j.persona : '' };
+  const conf = { cwd: j.cwd && fs.existsSync(j.cwd) ? j.cwd : defaultWorkDir(), model: j.model || DEFAULT_MODEL, persona: typeof j.persona === 'string' ? j.persona : '', enabled: j.enabled !== false };
   try { fs.mkdirSync(conf.cwd, { recursive: true }); } catch (e) { console.error('[agent] 작업 폴더를 만들 수 없음:', e.message); }
   return conf;
 }
@@ -919,6 +924,10 @@ function showReply(focus = false) {
 }
 
 function showTalk(focus = true) {
+  if (!claudeOn()) {
+    if (focus) primaryMascot()?.win.webContents.send('bridge-event', { type: 'say', payload: { text: 'Claude 모드가 꺼져 있어요. 우클릭 메뉴에서 켜 주세요' } });
+    return;
+  }
   agent.warm();   // Claude 를 미리 켜 둠 (첫 대답이 빨라짐)
   if (!alive(talk.input)) talk.input = makeTalkWindow('input', IN_W, IN_H);
   if (!alive(talk.reply)) talk.reply = makeTalkWindow('reply', RE_W, RE_H);
@@ -928,10 +937,12 @@ function showTalk(focus = true) {
     if (focus) { talk.input.show(); talk.input.focus(); sendTalk('talk-focus'); } else talk.input.showInactive();
   });
   if (talk.hasReply) whenLoaded(talk.reply, () => talk.reply.showInactive());
+  primaryMascot()?.win.webContents.send('talk-visible', true);
 }
 
 function hideTalk() {
   for (const w of [talk.input, talk.reply]) if (alive(w)) w.hide();
+  primaryMascot()?.win.webContents.send('talk-visible', false);
   dropMascot();
 }
 
@@ -958,6 +969,24 @@ function startTalk() {
   for (const [k, fn] of keys) {
     if (!globalShortcut.register(k, fn)) { failedKeys.add(k); console.warn('[talk] 단축키 등록 실패 (다른 앱이 쓰는 중?):', k); }
   }
+  sendMode();
+}
+
+// ===== Claude 모드 =====
+// 켜면 캐릭터가 Claude 에이전트(말 걸기·화면 보기), 끄면 혼잣말하는 피규어 (Claude 안 씀, 토큰 0)
+// 번역·다듬기·포모도로·알림은 두 모드 모두 그대로
+const claudeOn = () => agentConf?.enabled !== false;
+const sendMode = () => { for (const m of liveMascots()) m.win.webContents.send('claude-mode', { on: claudeOn() }); };
+function modeItem() {
+  return { label: '🤖 Claude 모드 (끄면 혼잣말 피규어)', type: 'checkbox', checked: claudeOn(), click: (item) => setClaudeMode(item.checked) };
+}
+function setClaudeMode(on) {
+  agentConf.enabled = !!on;
+  saveAgentConf();
+  if (!on) { hideTalk(); agent.stop(); }
+  sendMode();
+  refreshTrayMenu();
+  bridge?.broadcast({ type: 'mode', payload: { claude: !!on } });
 }
 
 // ===== 클립보드 번역·다듬기 =====
@@ -1052,7 +1081,7 @@ ipcMain.on('open-url', (event, url) => { if (/^https:\/\/[a-z0-9.-]*claude\.(ai|
 function claudeMenu() {
   return {
     label: '🤖 Claude',
-    submenu: [
+    submenu: claudeOn() ? [
       { label: `말 걸기  (${process.platform === 'darwin' ? '⌘⇧Space' : 'Ctrl+Shift+Space'} · 더블클릭)`, click: () => showTalk(true) },
       { label: '🆕 새 대화', enabled: !agent.busy, click: newConversation },
       { type: 'separator' },
@@ -1071,6 +1100,10 @@ function claudeMenu() {
       { type: 'separator' },
       { label: '🗣 캐릭터 말투(지침)', click: () => { showTalk(true); showReply(true); whenLoaded(talk.reply, () => talk.reply.webContents.send('talk-persona')); } },
       { label: '🔑 Claude 계정 로그인', click: doLogin }
+    ] : [
+      { label: '📋 클립보드 번역', click: () => clipAction('translate') },
+      { label: '📋 클립보드 다듬기', click: () => clipAction('polish') },
+      { label: '🍅 포모도로 시작/끝', click: () => handleCommand({ name: 'pomodoro.toggle' }) }
     ]
   };
 }
@@ -1092,6 +1125,7 @@ ipcMain.handle('agent-send', async (event, text) => {
   });
   return null;
 });
+ipcMain.handle('claude-mode-get', () => claudeOn());
 ipcMain.on('agent-answer', (event, { id, allow }) => agent.answer(id, allow));
 ipcMain.on('agent-stop', () => agent.stop());
 ipcMain.on('agent-login', () => doLogin());
@@ -1158,6 +1192,7 @@ const updateOpts = () => ({ beforeQuit: () => dropMascot(), say: mascotSay });
 // question 이 있으면 바로 묻는다 (스트림덱 버튼 등).
 const SCREEN_KEY = 'CommandOrControl+Shift+0';
 async function captureScreen(question) {
+  if (!claudeOn()) return { ok: false, error: 'claude-off' };
   if (process.platform === 'darwin' && systemPreferences.getMediaAccessStatus('screen') !== 'granted') {
     // 처음엔 권한 요청이 뜨도록 한 번 시도는 해 본다
     try { await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 1, height: 1 } }); } catch { /* 무시 */ }
@@ -1203,6 +1238,7 @@ async function captureScreen(question) {
 function sendFromOutside(text) {
   const t = String(text || '').trim();
   if (!t) return { ok: false, error: 'empty' };
+  if (!claudeOn()) return { ok: false, error: 'claude-off' };
   if (agent.busy) return { ok: false, error: 'busy' };
   showTalk(false);
   showReply(false);
@@ -1244,6 +1280,8 @@ async function handleCommand(payload = {}, client) {
   let result;
   try {
     switch (name) {
+      case 'mode.set': setClaudeMode(args.on !== false); result = { ok: true, claude: claudeOn() }; break;
+      case 'mode.toggle': setClaudeMode(!claudeOn()); result = { ok: true, claude: claudeOn() }; break;
       case 'talk.open': showTalk(true); result = { ok: true }; break;
       case 'talk.toggle': toggleTalk(); result = { ok: true }; break;
       case 'talk.hide': hideTalk(); result = { ok: true }; break;
@@ -1260,7 +1298,7 @@ async function handleCommand(payload = {}, client) {
       case 'pomodoro.skip': result = { ok: true, state: pomodoro.skip() }; break;
       case 'reminder.list': result = { ok: true, reminders: reminders.list().map((r) => ({ id: r.id, text: r.text, at: r.at, daily: r.daily })) }; break;
       case 'mascot.say': primaryMascot()?.win.webContents.send('bridge-event', { type: 'say', payload: { text: String(args.text || '') } }); result = { ok: true }; break;
-      case 'state.get': result = { ok: true, agent: agent.busy ? 'working' : 'idle', pomodoro: pomodoro.state(), usage, build: currentBuild() }; break;
+      case 'state.get': result = { ok: true, claude: claudeOn(), agent: agent.busy ? 'working' : 'idle', pomodoro: pomodoro.state(), usage, build: currentBuild() }; break;
       case 'usage.get': await agent.refreshUsage(); result = { ok: true, usage }; break;
       default: result = { ok: false, error: 'unknown-command' };
     }

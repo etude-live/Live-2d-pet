@@ -602,13 +602,26 @@ function talk() {
 function scheduleRandomEvent() {
   setTimeout(() => {
     if (settings.events && !isDragging) {
-      // 쉬는 동안엔 말없이 몸짓만 (DeepSeek짱처럼). 말은 일할 때의 추론 혼잣말로
-      if (!agentUi.running) playMotion();
+      // Claude 모드: 말없이 몸짓만 (말 걸기 창과 겹치지 않게)
+      // 피규어 모드: 절반은 혼잣말 (인사·시각·클릭 대사·아재개그)
+      if (!claudeMode && Math.random() < 0.5) idleMutter();
+      else if (!agentUi.running) playMotion();
     }
     scheduleRandomEvent();
   }, 60000 + Math.random() * 120000);
 }
 scheduleRandomEvent();
+
+function idleMutter() {
+  const r = Math.random();
+  if (r < 0.3 && tellJoke(true)) { playMotion(); return; }
+  playMotion();
+  if (r < 0.5) { say(`${greeting()}\n${timeText()}`, 4500, { tts: false, auto: true, lip: true }); return; }
+  const line = AGENT.parseLine(pick(AGENT.CLICK));
+  const face = line.faces.find((f) => agentExpression(f));
+  if (face) agentFace(face, 3500);
+  say(line.text, 3800, { tts: false, auto: true, lip: true });
+}
 
 // 時報（毎時0分）。代表だけ
 let lastChimeHour = new Date().getHours();
@@ -706,7 +719,8 @@ window.addEventListener('click', (e) => {
 
 window.addEventListener('dblclick', (e) => {
   clearTimeout(clickTimer);
-  ipcRenderer.send('agent-open');   // 더블클릭 = Claude에게 말 걸기
+  if (claudeMode) ipcRenderer.send('agent-open');   // 더블클릭 = Claude에게 말 걸기
+  else { playMotion(); tellJoke(false); }           // 피규어 모드: 아재개그
 });
 
 window.addEventListener('wheel', (e) => {
@@ -838,6 +852,18 @@ function agentExpression(state) {
   return null;
 }
 
+// Claude 모드(에이전트) / 끄면 혼잣말 피규어. talkVisible: 말 걸기 창이 떠 있음 (그동안 내 말풍선은 쉼)
+let claudeMode = true, talkVisible = false;
+ipcRenderer.invoke('claude-mode-get').then((on) => { claudeMode = on !== false; }).catch(() => {});
+ipcRenderer.on('claude-mode', (event, { on }) => {
+  const was = claudeMode;
+  claudeMode = !!on;
+  if (was === claudeMode) return;
+  playMotion();
+  say(claudeMode ? 'Claude 모드 켰어요! 더블클릭하면 말 걸 수 있어요' : '이제 그냥 피규어로 있을게요~ 더블클릭하면 아재개그!', 4000, { tts: false, lip: true });
+});
+ipcRenderer.on('talk-visible', (event, v) => { talkVisible = !!v; if (v) { clearTimeout(jokeTimer); bubble.classList.remove('show'); } });
+
 const agentUi = { running: false, ask: null, lastToolSay: 0, lastMutterAt: 0, lastSayAt: 0, expTimer: null, flashUntil: 0 };
 
 function agentFace(state, ms = 0) {
@@ -864,7 +890,7 @@ function clickReact() {
   playMotion();
   const face = line.faces.find((f) => agentExpression(f));
   if (face) agentFace(face, 3500);
-  say(line.text, 3500, { tts: false, lip: true });
+  if (!talkVisible) say(line.text, 3500, { tts: false, lip: true });   // 말 걸기 창이 떠 있으면 표정·몸짓만
 }
 
 function agentOnClick() {
@@ -875,7 +901,7 @@ function agentOnClick() {
 
 function onAgentEvent(e) {
   const now = Date.now();
-  agentUi.quiet = !!e.talkOpen;   // 머리 위 답변 말풍선이 떠 있으면 내 말풍선은 쉼 (표정·몸짓만)
+  agentUi.quiet = !!e.talkOpen || talkVisible;   // 머리 위 답변 말풍선이 떠 있으면 내 말풍선은 쉼 (표정·몸짓만)
   switch (e.type) {
     case 'start':
       agentUi.running = true; agentUi.ask = null;
@@ -883,23 +909,9 @@ function onAgentEvent(e) {
       playMotion();
       agentSay(AGENT.TEXT.start, 2500);
       break;
-    case 'thought':
-    case 'text': {
-      // 추론 요약과 도구 사이의 짧은 진행 문장을 가끔 혼잣말로 (6초에 한 번, 방금 말했으면 쉼)
-      if (!agentUi.running || agentUi.ask) break;
-      if (now - agentUi.lastMutterAt < 6000 || now - agentUi.lastSayAt < 2500) break;
-      const paras = e.type === 'thought' ? AGENT.thoughtParagraphs(e.text) : [AGENT.answerLine(e.text, 60)];
-      const line = paras.map((p) => (e.type === 'thought' ? AGENT.thoughtLine(p) : p)).filter(Boolean).pop();
-      if (!line) break;
-      agentUi.lastMutterAt = now;
-      agentSay(line, Math.min(5200, Math.max(3800, 1500 + line.length * 55)), { mutter: true });
-      if (Math.random() < 0.35) playMotion();
-      break;
-    }
+    case 'thought':   // 추론 혼잣말은 말 걸기 창과 겹쳐서 뺐다. 가끔 몸짓만
     case 'tool':
-      if (agentUi.ask || now - agentUi.lastToolSay < 1500) break;
-      agentUi.lastToolSay = now;
-      agentSay(AGENT.toolLine(e.name), 2500);
+      if (agentUi.running && !agentUi.ask && now - agentUi.lastToolSay > 4000) { agentUi.lastToolSay = now; playMotion(); }
       break;
     case 'permission': {
       agentUi.ask = e;
