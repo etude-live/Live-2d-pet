@@ -64,7 +64,7 @@ function summarizeInput(tool, input = {}, cwd = '') {
 }
 
 // 로그인/인증 문제는 알아듣기 쉬운 안내로 바꾼다
-const LOGIN_HINT = 'Claude에 로그인되어 있지 않은 것 같아요. 터미널에서 claude 를 실행해 로그인(/login)한 뒤 다시 시켜 주세요.';
+const LOGIN_HINT = 'Claude 계정 로그인이 필요해요. 아래 로그인 버튼을 눌러 주세요.';
 function friendlyError(text) {
   const t = String(text || '');
   if (/invalid api key|authentication|unauthori[sz]ed|\b401\b|not logged in|please run \/login|oauth|credential/i.test(t)) return LOGIN_HINT;
@@ -141,7 +141,7 @@ function createAgent({ onEvent, getOptions }) {
         model: opts.model || undefined,
         resume: sessionId || undefined,
         abortController: abort,
-        permissionMode: 'default',     // 읽기 외의 일은 canUseTool 로 물어본다
+        permissionMode: 'acceptEdits', // 작업 폴더 안의 파일 쓰기·고치기는 바로, 명령 실행 등은 canUseTool 로 물어본다
         canUseTool,
         thinking: { type: 'adaptive', display: 'summarized' },   // 혼잣말 재료
         systemPrompt: { type: 'preset', preset: 'claude_code', append: PERSONA },
@@ -175,4 +175,37 @@ function createAgent({ onEvent, getOptions }) {
   };
 }
 
-module.exports = { createAgent, summarizeInput };
+// ===== 로그인 (Claude Code 계정. Pro/Max 구독 로그인) =====
+// SDK 에 들어 있는 claude 실행 파일의 auth 명령을 쓴다. 터미널 없이 앱에서 로그인 창(브라우저)을 연다.
+const { execFile, spawn } = require('child_process');
+
+function authStatus() {
+  return new Promise((resolve) => {
+    const exe = claudeExecutable();
+    if (!exe) { resolve({ loggedIn: null }); return; }   // 확인할 수 없음 → 일단 시도해 보게 둔다
+    execFile(exe, ['auth', 'status', '--json'], { timeout: 15000 }, (err, stdout) => {
+      try { resolve(JSON.parse(stdout)); } catch { resolve({ loggedIn: err ? false : null }); }
+    });
+  });
+}
+
+// 브라우저 로그인. onUrl(url): 실행 파일이 브라우저를 못 열 때 대신 열 주소
+function login({ onUrl } = {}) {
+  return new Promise((resolve) => {
+    const exe = claudeExecutable();
+    if (!exe) { resolve(false); return; }
+    const p = spawn(exe, ['auth', 'login', '--claudeai'], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let opened = false;
+    const scan = (d) => {
+      const m = String(d).match(/https:\/\/\S+/);
+      if (m && !opened) { opened = true; onUrl?.(m[0]); }
+    };
+    p.stdout.on('data', scan);
+    p.stderr.on('data', scan);
+    const timer = setTimeout(() => p.kill(), 5 * 60 * 1000);   // 5분 안에 로그인 안 하면 그만
+    p.on('close', async () => { clearTimeout(timer); resolve((await authStatus()).loggedIn !== false); });
+    p.on('error', () => { clearTimeout(timer); resolve(false); });
+  });
+}
+
+module.exports = { createAgent, summarizeInput, authStatus, login, LOGIN_HINT };

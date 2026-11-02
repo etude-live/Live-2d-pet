@@ -4,7 +4,7 @@
 const TEXT = {
   hello: '안녕하세요! 오늘은 뭘 만들어 볼까요?',
   start: '알겠어요! 시작할게요',
-  approval: '확인이 필요해요! 한번 봐 주세요',
+  approval: '확인 부탁해요!',
   done: '다 했어요!',
   error: '앗, 문제가 생겼어요…',
   stopped: '네, 멈출게요',

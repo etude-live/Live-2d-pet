@@ -55,11 +55,29 @@ body, html {
   border-top-color: rgba(255, 255, 255, 0.96);
 }
 
-/* 혼잣말(Claude 에이전트의 추론): 점선 말풍선 */
-#bubble.mutter {
-  background: rgba(248, 245, 255, 0.94);
-  color: #5a5470;
-  font-style: italic;
-  border: 1.5px dashed #b9b0d6;
+/* 말풍선: DeepSeek짱(deepseek-harness-kr) 파스텔 테마 */
+#bubble {
+  background: #fffffff7;
+  color: #26315e;
+  border: 2px solid #8fa6ff;
+  border-radius: 16px;
+  font-weight: 600;
+  word-break: keep-all;
+  text-align: center;
+  box-shadow: 0 6px 18px #5f7cf533;
 }
-#bubble.mutter::after { border-top-color: rgba(248, 245, 255, 0.94); }
+#bubble::after {
+  bottom: -8px; margin-left: -6px; width: 12px; height: 12px;
+  border: 0; background: inherit;
+  border-right: 2px solid #8fa6ff; border-bottom: 2px solid #8fa6ff;
+  transform: rotate(45deg);
+}
+/* 혼잣말(Claude 에이전트의 추론): 점선, 연한 글씨 */
+#bubble.mutter {
+  background: #f7f8fff2;
+  color: #5a6390;
+  font-weight: 500;
+  font-style: italic;
+  border: 2px dashed #b9c6ff;
+}
+#bubble.mutter::after { border-color: #b9c6ff; border-style: dashed; }

@@ -592,10 +592,10 @@ function tellJoke(auto = false) {
   return true;
 }
 
+// 메뉴의 아재개그
 function talk() {
   playMotion();
-  if (Math.random() < 0.75 && tellJoke(false)) return;
-  say(`${greeting()}\n${timeText()}`);
+  tellJoke(false);
 }
 
 // ランダムイベント（60〜180秒ごと）：半分はボイス、残りはしぐさ＋ひとこと
@@ -706,7 +706,7 @@ window.addEventListener('click', (e) => {
 
 window.addEventListener('dblclick', (e) => {
   clearTimeout(clickTimer);
-  talk();
+  ipcRenderer.send('agent-open');   // 더블클릭 = Claude에게 말 걸기
 });
 
 window.addEventListener('wheel', (e) => {
@@ -904,8 +904,8 @@ function onAgentEvent(e) {
       agentUi.ask = e;
       agentFace('approval');
       playMotion();
-      const what = String(e.summary || '').slice(0, 60);
-      agentSay(`${AGENT.askLine(e.tool)}\n${what}${what.length >= 60 ? '…' : ''}\n(저를 누르면 창이 열려요)`, 55000);
+      // 자세한 내용과 버튼은 말 걸기 창에. 여기선 짧게
+      agentSay(e.talkOpen === false ? AGENT.askLine(e.tool) : AGENT.TEXT.approval, 55000);
       break;
     }
     case 'permissionDone':
@@ -917,8 +917,9 @@ function onAgentEvent(e) {
     case 'done': {
       agentFace('done', 4000);
       playMotion();
-      const summary = AGENT.answerLine(e.result, 60);
-      agentSay(summary ? `${AGENT.TEXT.done}\n${summary}` : AGENT.TEXT.done, 5000);
+      // 말 걸기 창이 열려 있으면 답은 거기 있으니 짧게
+      const summary = e.talkOpen ? '' : AGENT.answerLine(e.result, 60);
+      agentSay(summary ? `${AGENT.TEXT.done}\n${summary}` : AGENT.TEXT.done, 4000);
       break;
     }
     case 'error':
@@ -927,8 +928,8 @@ function onAgentEvent(e) {
       playMotion();
       agentSay(AGENT.TEXT.error, 5000);
       break;
-    case 'needFolder':
-      agentSay(AGENT.TEXT.noFolder, 4000);
+    case 'loginDone':
+      if (e.ok) { agentFace('done', 3000); agentSay('로그인됐어요! 이제 말 걸어 주세요', 4000); }
       break;
     case 'idle':
       agentUi.running = false; agentUi.ask = null;

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, screen, dialog, shell, safeStorage } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, screen, dialog, shell, globalShortcut } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const tracker = require('./tracker');
@@ -8,7 +8,7 @@ const { isMotionFile } = require('../shared/motions');
 const { loadConfig } = require('./config');
 const { startBridge } = require('./bridge');
 const { createStore } = require('./characters');
-const { createAgent } = require('./agent');
+const { createAgent, login } = require('./agent');
 const { thumbnailUrl, customThumb, setCustomThumb } = require('./thumbs');
 const { FORMATS, importExtensions, importLabel } = require('../shared/formats');
 
@@ -66,7 +66,7 @@ if (!app.requestSingleInstanceLock()) {
     startCursorTracking();
     createTray();
     startBridgeFromConfig();
-    agentConf = loadAgentConf();
+    startTalk();
   });
 }
 
@@ -244,8 +244,8 @@ function createTray() {
     { label: '표시 / 숨기기', click: toggleVisible },
     { label: '위치 초기화', click: resetPosition },
     { type: 'separator' },
-    { label: '🤖 Claude에게 일 시키기', click: () => openAgentWindow() },
-    { label: '💬 말 걸기', click: () => primaryMascot()?.win.webContents.send('menu-action', { type: 'talk' }) },
+    { label: '💬 Claude에게 말 걸기', click: () => showTalk(true) },
+    { label: '🤣 아재개그', click: () => primaryMascot()?.win.webContents.send('menu-action', { type: 'talk' }) },
     { label: '⚙️ 설정 열기', click: () => openSettingsWindow() },
     { label: '📜 크레딧', click: openCredits },
     { label: '📂 설정 폴더 열기', click: () => shell.openPath(app.getPath('userData')) },
@@ -704,8 +704,9 @@ onMascot('show-context-menu', async (m) => {
   }
 
   const template = [
-    { label: '🤖 Claude에게 일 시키기', click: () => openAgentWindow() },
-    { label: '💬 말 걸기', click: () => act('talk') },
+    { label: '💬 Claude에게 말 걸기', click: () => showTalk(true) },
+    claudeMenu(),
+    { label: '🤣 아재개그', click: () => act('talk') },
     { type: 'separator' },
     { label: '👗 모델', submenu: modelItems },
     {
@@ -743,113 +744,167 @@ onMascot('show-context-menu', async (m) => {
 });
 
 // ===== Claude 에이전트 =====
-// 대화는 하나. 반응은 대표 캐릭터만 한다(VS Code 연동과 같음)
-let agentWindow = null;
-let agentConf = { cwd: '', model: '', apiKey: '' };
+// 대화는 앱을 켤 때마다 새로 시작하고, 끌 때까지 이어진다. 반응은 대표 캐릭터만 한다.
+// 말 걸기 창(talk)은 캐릭터 옆에 붙은 투명 창: 답변 말풍선 + 입력칸. 더블클릭 또는 단축키로 연다.
+const TALK_SHORTCUT = 'CommandOrControl+Shift+Space';
+const DEFAULT_MODEL = 'claude-haiku-5-5';
+const MODELS = [
+  ['claude-haiku-5-5', 'Haiku 5.5 (빠름·가벼움)'],
+  ['claude-sonnet-5-5', 'Sonnet 5.5'],
+  ['claude-opus-5-5', 'Opus 5.5 (어려운 일)']
+];
+let talkWindow = null;
+let agentConf = { cwd: '', model: DEFAULT_MODEL };
 const agentConfFile = () => path.join(app.getPath('userData'), 'agent.json');
+const defaultWorkDir = () => path.join(app.getPath('home'), 'Claude작업');
 
 function loadAgentConf() {
-  try {
-    const j = JSON.parse(fs.readFileSync(agentConfFile(), 'utf8'));
-    let apiKey = '';
-    if (j.apiKeyEnc && safeStorage.isEncryptionAvailable()) {
-      try { apiKey = safeStorage.decryptString(Buffer.from(j.apiKeyEnc, 'base64')); } catch { /* 다른 기기에서 옮긴 파일 */ }
-    }
-    return { cwd: j.cwd || '', model: j.model || '', apiKey };
-  } catch {
-    return { cwd: '', model: '', apiKey: '' };
-  }
+  let j = {};
+  try { j = JSON.parse(fs.readFileSync(agentConfFile(), 'utf8')); } catch { /* 처음 */ }
+  const conf = { cwd: j.cwd && fs.existsSync(j.cwd) ? j.cwd : defaultWorkDir(), model: j.model || DEFAULT_MODEL };
+  try { fs.mkdirSync(conf.cwd, { recursive: true }); } catch (e) { console.error('[agent] 작업 폴더를 만들 수 없음:', e.message); }
+  return conf;
 }
 
 function saveAgentConf() {
-  const j = { cwd: agentConf.cwd, model: agentConf.model };
-  if (agentConf.apiKey && safeStorage.isEncryptionAvailable()) {
-    j.apiKeyEnc = safeStorage.encryptString(agentConf.apiKey).toString('base64');
-  }
-  try { fs.writeFileSync(agentConfFile(), JSON.stringify(j, null, 2), { mode: 0o600 }); } catch (e) { console.error('[agent] 설정 저장 실패:', e.message); }
+  try { fs.writeFileSync(agentConfFile(), JSON.stringify(agentConf, null, 2)); } catch (e) { console.error('[agent] 설정 저장 실패:', e.message); }
 }
+
+const sendTalk = (ch, msg) => { if (talkWindow && !talkWindow.isDestroyed()) talkWindow.webContents.send(ch, msg); };
 
 const agent = createAgent({
   getOptions: () => agentConf,
   onEvent: (e) => {
-    if (agentWindow && !agentWindow.isDestroyed()) {
-      agentWindow.webContents.send('agent-event', e);
-      if (e.type === 'permission' && !agentWindow.isVisible()) agentWindow.showInactive();
-    }
-    primaryMascot()?.win.webContents.send('agent-event', e);
+    const talkOpen = !!talkWindow && !talkWindow.isDestroyed() && talkWindow.isVisible();
+    sendTalk('agent-event', e);
+    if (e.type === 'permission' && !talkOpen) showTalk(false);   // 승인은 말풍선 안의 버튼으로 받는다
+    primaryMascot()?.win.webContents.send('agent-event', { ...e, talkOpen });
   }
 });
 
-const agentState = () => ({ cwd: agentConf.cwd, model: agentConf.model, hasKey: !!agentConf.apiKey, busy: agent.busy });
-
-function openAgentWindow() {
-  if (agentWindow && !agentWindow.isDestroyed()) { agentWindow.show(); agentWindow.focus(); return; }
-  const W = 420, H = 560;
-  const wa = screen.getPrimaryDisplay().workArea;
-  let x = wa.x + wa.width - W - 20, y = wa.y + wa.height - H - 20;
+// 캐릭터(대표) 왼쪽에 붙이고, 자리가 없으면 오른쪽
+const TALK_W = 360, TALK_H = 520;
+function placeTalk() {
   const pm = primaryMascot();
-  if (pm) {   // 대표 캐릭터 왼쪽에 붙여서
-    const b = pm.win.getBounds();
-    x = Math.max(wa.x, b.x - W - 4);
-    y = Math.min(Math.max(wa.y, b.y + b.height - H), wa.y + wa.height - H);
-  }
-  agentWindow = new BrowserWindow({
-    x, y, width: W, height: H, minWidth: 320, minHeight: 360,
-    title: 'Claude에게 일 시키기',
-    alwaysOnTop: true,
-    webPreferences: { nodeIntegration: true, contextIsolation: false }
-  });
-  agentWindow.setMenuBarVisibility(false);
-  agentWindow.loadFile(path.join(__dirname, '../renderer/agent.html'));
-  // 닫아도 작업은 계속된다. 창만 숨김
-  agentWindow.on('close', (e) => { if (!app.isQuitting) { e.preventDefault(); agentWindow.hide(); } });
+  if (!talkWindow || talkWindow.isDestroyed() || !pm) return;
+  const b = pm.win.getBounds();
+  const ins = pm.inset || { left: 0, top: 0, right: b.width, bottom: b.height };
+  const wa = screen.getDisplayMatching(b).workArea;
+  let x = Math.round(b.x + ins.left - TALK_W + 30);
+  if (x < wa.x) { x = Math.round(b.x + ins.right - 30); }
+  x = Math.min(Math.max(wa.x, x), wa.x + wa.width - TALK_W);
+  const y = Math.min(Math.max(wa.y, Math.round(b.y + ins.bottom - TALK_H)), wa.y + wa.height - TALK_H);
+  talkWindow.setBounds({ x, y, width: TALK_W, height: TALK_H });
 }
 
-ipcMain.handle('agent-get-state', () => agentState());
+function createTalkWindow() {
+  talkWindow = new BrowserWindow({
+    width: TALK_W, height: TALK_H, show: false,
+    transparent: true, frame: false, hasShadow: false, resizable: false,
+    alwaysOnTop: true, skipTaskbar: true, minimizable: false, roundedCorners: false,
+    webPreferences: { nodeIntegration: true, contextIsolation: false }
+  });
+  talkWindow.setAlwaysOnTop(true, 'screen-saver');
+  if (process.platform === 'darwin') talkWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
+  talkWindow.loadFile(path.join(__dirname, '../renderer/talk.html'));
+  talkWindow.on('closed', () => { talkWindow = null; });
+}
+
+function showTalk(focus = true) {
+  if (!talkWindow || talkWindow.isDestroyed()) createTalkWindow();
+  placeTalk();
+  const go = () => {
+    if (focus) { talkWindow.show(); talkWindow.focus(); sendTalk('talk-focus'); } else talkWindow.showInactive();
+  };
+  if (talkWindow.webContents.isLoading()) talkWindow.webContents.once('did-finish-load', go); else go();
+}
+
+function toggleTalk() {
+  if (talkWindow && !talkWindow.isDestroyed() && talkWindow.isVisible() && talkWindow.isFocused()) talkWindow.hide();
+  else showTalk(true);
+}
+
+// 캐릭터가 움직이면 따라간다
+setInterval(() => { if (talkWindow && !talkWindow.isDestroyed() && talkWindow.isVisible()) placeTalk(); }, 120);
+
+function startTalk() {
+  agentConf = loadAgentConf();
+  if (!globalShortcut.register(TALK_SHORTCUT, toggleTalk)) console.warn('[talk] 단축키 등록 실패:', TALK_SHORTCUT);
+}
+
+async function changeWorkDir() {
+  if (agent.busy) return;
+  const r = await dialog.showOpenDialog({
+    title: 'Claude가 일할 폴더', defaultPath: agentConf.cwd, properties: ['openDirectory', 'createDirectory']
+  });
+  if (r.canceled || !r.filePaths[0] || r.filePaths[0] === agentConf.cwd) return;
+  agentConf.cwd = r.filePaths[0];
+  agent.reset();
+  saveAgentConf();
+  sendTalk('talk-reset', { note: `작업 폴더: ${agentConf.cwd}` });
+}
+
+function setModel(id) {
+  agentConf.model = id;
+  saveAgentConf();
+}
+
+function newConversation() {
+  if (agent.busy) return;
+  agent.reset();
+  sendTalk('talk-reset', { note: '새 대화를 시작해요' });
+}
+
+async function doLogin() {
+  sendTalk('agent-event', { type: 'loginStart' });
+  const ok = await login({ onUrl: (url) => shell.openExternal(url) });
+  sendTalk('agent-event', { type: 'loginDone', ok });
+  primaryMascot()?.win.webContents.send('agent-event', { type: 'loginDone', ok });
+}
+
+// 메뉴(캐릭터 우클릭·트레이)에 넣는 Claude 항목
+function claudeMenu() {
+  return {
+    label: '🤖 Claude',
+    submenu: [
+      { label: `말 걸기  (${process.platform === 'darwin' ? '⌘⇧Space' : 'Ctrl+Shift+Space'} · 더블클릭)`, click: () => showTalk(true) },
+      { label: '🆕 새 대화', enabled: !agent.busy, click: newConversation },
+      { type: 'separator' },
+      { label: '모델', submenu: MODELS.map(([id, label]) => ({ label, type: 'radio', checked: agentConf.model === id, click: () => setModel(id) })) },
+      { label: `📁 작업 폴더: ${path.basename(agentConf.cwd || '')}`, enabled: !agent.busy, click: changeWorkDir },
+      { label: '📂 작업 폴더 열기', click: () => shell.openPath(agentConf.cwd) },
+      { type: 'separator' },
+      { label: '🔑 Claude 계정 로그인', click: doLogin }
+    ]
+  };
+}
+
 ipcMain.handle('agent-send', async (event, text) => {
   const t = String(text || '').trim();
   if (!t) return null;
   if (agent.busy) return '이미 작업 중이에요';
-  if (!agentConf.cwd) {
-    primaryMascot()?.win.webContents.send('agent-event', { type: 'needFolder' });
-    return '작업 폴더를 먼저 골라 주세요';
-  }
+  try { fs.mkdirSync(agentConf.cwd, { recursive: true }); } catch { /* 아래에서 알림 */ }
   agent.send(t).catch((e) => {
-    primaryMascot()?.win.webContents.send('agent-event', { type: 'error', message: e.message });
-    agentWindow?.webContents.send('agent-event', { type: 'error', message: e.message });
+    const ev = { type: 'error', message: e.message };
+    sendTalk('agent-event', ev);
+    primaryMascot()?.win.webContents.send('agent-event', ev);
   });
   return null;
 });
 ipcMain.on('agent-answer', (event, { id, allow }) => agent.answer(id, allow));
 ipcMain.on('agent-stop', () => agent.stop());
-ipcMain.handle('agent-reset', () => { agent.reset(); return agentState(); });
-ipcMain.handle('agent-pick-folder', async () => {
-  if (agent.busy) return agentState();
-  const r = await dialog.showOpenDialog(agentWindow, {
-    title: 'Claude가 일할 폴더',
-    defaultPath: agentConf.cwd || app.getPath('home'),
-    properties: ['openDirectory', 'createDirectory']
-  });
-  if (!r.canceled && r.filePaths[0] && r.filePaths[0] !== agentConf.cwd) {
-    agentConf.cwd = r.filePaths[0];
-    agent.reset(); // 폴더가 바뀌면 새 대화
-    saveAgentConf();
-  }
-  return agentState();
-});
-ipcMain.handle('agent-set', (event, patch = {}) => {
-  if (typeof patch.model === 'string') agentConf.model = patch.model;
-  if (typeof patch.apiKey === 'string') agentConf.apiKey = patch.apiKey;
-  saveAgentConf();
-  return agentState();
-});
-// 캐릭터를 눌러 승인 말풍선에 답할 때
+ipcMain.on('agent-login', () => doLogin());
+ipcMain.on('talk-hide', () => talkWindow?.hide());
+ipcMain.on('talk-ignore-mouse', (event, ignore) => talkWindow?.setIgnoreMouseEvents(ignore, { forward: true }));
+ipcMain.handle('talk-state', () => ({ model: agentConf.model, cwd: agentConf.cwd, busy: agent.busy, shortcut: TALK_SHORTCUT }));
+// 캐릭터 더블클릭 / 승인 대기 중 클릭
+onMascot('agent-open', () => showTalk(true));
 onMascot('agent-answer', (m, { id, allow }) => agent.answer(id, allow));
-onMascot('agent-open', () => openAgentWindow());
 
 app.on('before-quit', () => {
   app.isQuitting = true;
   agent.stop();
+  globalShortcut.unregisterAll();
   store?.flush();
   if (bridge) bridge.stop();
   if (trackerHandle) trackerHandle.stop();
