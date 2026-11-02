@@ -849,7 +849,7 @@ function agentFace(state, ms = 0) {
 }
 
 function agentSay(text, ms, opts = {}) {
-  if (!text) return;
+  if (!text || agentUi.quiet) return;
   if (say(text, ms, { tts: false, lip: true, ...opts })) agentUi.lastSayAt = Date.now();
 }
 
@@ -875,6 +875,7 @@ function agentOnClick() {
 
 function onAgentEvent(e) {
   const now = Date.now();
+  agentUi.quiet = !!e.talkOpen;   // 머리 위 답변 말풍선이 떠 있으면 내 말풍선은 쉼 (표정·몸짓만)
   switch (e.type) {
     case 'start':
       agentUi.running = true; agentUi.ask = null;

@@ -34,6 +34,13 @@ function claudeExecutable() {
   return undefined; // SDK 기본값에 맡김
 }
 
+// 사용자가 적은 캐릭터 지침(이름·말투·호칭 등)을 기본 지침 뒤에 붙인다
+function personaPrompt(custom) {
+  const t = String(custom || '').trim();
+  if (!t) return PERSONA;
+  return PERSONA + '\n\n## 캐릭터 지침 (사용자가 정함. 말투·호칭·성격은 이 지침을 기본 지침보다 우선해서 따르세요)\n' + t;
+}
+
 const PERSONA = [
   '당신은 사용자의 데스크톱에 사는 Live2D 캐릭터이자, 실제로 일을 해 주는 코딩·작업 도우미입니다.',
   '사용자와는 한국어로, 밝고 다정한 반말이 아닌 존댓말(해요체)로 이야기하세요.',
@@ -144,7 +151,7 @@ function createAgent({ onEvent, getOptions }) {
         permissionMode: 'acceptEdits', // 작업 폴더 안의 파일 쓰기·고치기는 바로, 명령 실행 등은 canUseTool 로 물어본다
         canUseTool,
         thinking: { type: 'adaptive', display: 'summarized' },   // 혼잣말 재료
-        systemPrompt: { type: 'preset', preset: 'claude_code', append: PERSONA },
+        systemPrompt: { type: 'preset', preset: 'claude_code', append: personaPrompt(opts.persona) },
         settingSources: ['user', 'project'],
         pathToClaudeCodeExecutable: claudeExecutable(),
         env
@@ -189,23 +196,31 @@ function authStatus() {
   });
 }
 
-// 브라우저 로그인. onUrl(url): 실행 파일이 브라우저를 못 열 때 대신 열 주소
-function login({ onUrl } = {}) {
-  return new Promise((resolve) => {
-    const exe = claudeExecutable();
-    if (!exe) { resolve(false); return; }
-    const p = spawn(exe, ['auth', 'login', '--claudeai'], { stdio: ['ignore', 'pipe', 'pipe'] });
-    let opened = false;
-    const scan = (d) => {
-      const m = String(d).match(/https:\/\/\S+/);
-      if (m && !opened) { opened = true; onUrl?.(m[0]); }
-    };
-    p.stdout.on('data', scan);
-    p.stderr.on('data', scan);
-    const timer = setTimeout(() => p.kill(), 5 * 60 * 1000);   // 5분 안에 로그인 안 하면 그만
-    p.on('close', async () => { clearTimeout(timer); resolve((await authStatus()).loggedIn !== false); });
-    p.on('error', () => { clearTimeout(timer); resolve(false); });
+// 브라우저 로그인. onUrl(url): 브라우저로 열 주소, onNeedCode(): 브라우저에 뜬 코드를 붙여 넣어야 할 때
+// 반환: { done: Promise<boolean>, sendCode(code), cancel() }
+function login({ onUrl, onNeedCode } = {}) {
+  const exe = claudeExecutable();
+  if (!exe) return { done: Promise.resolve({ ok: false, error: 'Claude 실행 파일을 찾지 못했어요' }), sendCode() {}, cancel() {} };
+  const p = spawn(exe, ['auth', 'login', '--claudeai'], { stdio: ['pipe', 'pipe', 'pipe'] });
+  let opened = false, lastErr = '';
+  const scan = (d) => {
+    const t = String(d);
+    const m = t.match(/https:\/\/\S+/);
+    if (m && !opened) { opened = true; onUrl?.(m[0]); onNeedCode?.(); }   // 실행 파일이 브라우저를 직접 연다. 주소는 예비용
+    if (/fail|error/i.test(t)) lastErr = t.trim();
+  };
+  p.stdout.on('data', scan);
+  p.stderr.on('data', scan);
+  const timer = setTimeout(() => p.kill(), 10 * 60 * 1000);   // 10분 안에 로그인 안 하면 그만
+  const done = new Promise((resolve) => {
+    p.on('close', async () => { clearTimeout(timer); const ok = (await authStatus()).loggedIn === true; resolve({ ok, error: ok ? '' : lastErr }); });
+    p.on('error', (e) => { clearTimeout(timer); resolve({ ok: false, error: e.message }); });
   });
+  return {
+    done,
+    sendCode(code) { try { p.stdin.write(String(code).trim() + '\n'); } catch { /* 이미 끝남 */ } },
+    cancel() { p.kill(); }
+  };
 }
 
 module.exports = { createAgent, summarizeInput, authStatus, login, LOGIN_HINT };

@@ -4,6 +4,8 @@ const { thoughtParagraphs, thoughtLine, toolLine, askLine } = require('../shared
 
 const $ = (id) => document.getElementById(id);
 const reply = $('reply'), replyText = reply.querySelector('.text'), input = $('input'), history = $('history');
+const PART = new URLSearchParams(location.search).get('part') || 'reply';
+document.body.classList.add('part-' + PART);
 let busy = false;
 let turn = null;            // 지금 대화 한 턴: { user, bot }
 const turns = [];           // 지난 대화
@@ -42,8 +44,8 @@ function md(src) {
 }
 
 // ---------- 말풍선 ----------
-function showReply() { reply.classList.add('show'); document.body.classList.remove('show-history'); }
-function scrollEnd() { reply.scrollTop = reply.scrollHeight; }
+function showReply() { reply.classList.add('show'); document.body.classList.remove('show-history', 'show-persona'); $('histBtn').textContent = '지난 대화'; }
+function scrollEnd() { reply.scrollTop = reply.scrollHeight; replyText.scrollTop = replyText.scrollHeight; }
 function setStatus(text) {
   let st = replyText.querySelector('.status');
   if (!text) { st?.remove(); return; }
@@ -79,6 +81,27 @@ function addLoginButton() {
   scrollEnd();
 }
 
+// 로그인 코드 붙여넣기 칸 (코드는 메인을 거쳐 로그인 과정에만 전달되고 저장하지 않음)
+function addCodeBox() {
+  replyText.querySelector('.codebox')?.remove();
+  const box = document.createElement('div');
+  box.className = 'codebox row';
+  box.style.marginTop = '8px';
+  box.innerHTML = '<input type="password" placeholder="인증 코드 붙여넣기" autocomplete="off"><button class="go">확인</button>';
+  const field = box.querySelector('input'), ok = box.querySelector('button');
+  const submit = () => {
+    const code = field.value.trim();
+    if (!code) return;
+    ipcRenderer.send('agent-login-code', code);
+    box.outerHTML = '<div class="note">코드를 넣었어요. 확인하는 중…</div>';
+  };
+  ok.onclick = submit;
+  field.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+  replyText.append(box);
+  scrollEnd();
+  field.focus();
+}
+
 function setBusy(on) {
   busy = on;
   document.body.classList.toggle('busy', on);
@@ -95,6 +118,11 @@ function renderHistory() {
 // ---------- 에이전트 이벤트 ----------
 let lastMutter = 0;
 ipcRenderer.on('agent-event', (ev, e) => {
+  if (PART === 'input') {   // 입력칸은 바쁨 표시만
+    if (e.type === 'start') setBusy(true);
+    if (e.type === 'idle') { setBusy(false); input.focus(); }
+    return;
+  }
   switch (e.type) {
     case 'start':
       setBusy(true);
@@ -156,10 +184,26 @@ ipcRenderer.on('agent-event', (ev, e) => {
     case 'idle':
       setBusy(false);
       if (turn) { turns.push(turn); turn = null; }
-      input.focus();
       break;
-    case 'loginStart': addNote('브라우저에서 로그인 창이 열려요. 로그인하고 돌아와 주세요.'); break;
-    case 'loginDone': addNote(e.ok ? '로그인됐어요! 다시 말 걸어 주세요.' : '로그인하지 못했어요. 다시 시도해 주세요.', !e.ok); break;
+    case 'loginStart':
+      showReply();
+      addNote('브라우저에서 Claude 로그인 창이 열려요. 로그인한 뒤 화면에 나온 코드를 아래 칸에 붙여 넣어 주세요.');
+      addCodeBox();
+      break;
+    case 'loginNeedCode': replyText.querySelector('.codebox input')?.focus(); break;
+    case 'loginUrl': {
+      const a = document.createElement('div');
+      a.className = 'note';
+      a.innerHTML = '브라우저가 안 열렸으면 <a href="#">여기</a>를 눌러 주세요';
+      a.querySelector('a').onclick = (ev2) => { ev2.preventDefault(); ipcRenderer.send('open-url', e.url); };
+      replyText.insertBefore(a, replyText.querySelector('.codebox'));
+      break;
+    }
+    case 'loginDone':
+      replyText.querySelector('.codebox')?.remove();
+      if (e.ok) addNote('로그인됐어요! 이제 말 걸어 주세요.');
+      else { addNote('로그인하지 못했어요. ' + (/accepted|expired/i.test(e.error || '') ? '코드가 맞지 않거나 만료됐어요. ' : '') + '다시 시도해 주세요.', true); addLoginButton(); }
+      break;
   }
 });
 
@@ -169,17 +213,39 @@ ipcRenderer.on('talk-reset', (ev, { note } = {}) => {
   if (note) addNote(note);
   renderHistory();
 });
-ipcRenderer.on('talk-focus', () => input.focus());
+// 머리 위 / 옆
+ipcRenderer.on('talk-side', (ev, side) => document.body.classList.toggle('side-top', side === 'top'));
+
+// ---------- 말투(지침) ----------
+async function openPersona() {
+  $('personaText').value = await ipcRenderer.invoke('persona-get');
+  document.body.classList.remove('show-history');
+  document.body.classList.add('show-persona');
+  $('personaText').focus();
+}
+function closePersona() { document.body.classList.remove('show-persona'); }
+ipcRenderer.on('talk-persona', () => { if (PART === 'reply') openPersona(); });
+$('personaBtn').onclick = () => (document.body.classList.contains('show-persona') ? closePersona() : openPersona());
+$('personaCancel').onclick = closePersona;
+$('personaSave').onclick = async () => {
+  await ipcRenderer.invoke('persona-set', $('personaText').value);
+  closePersona();
+  showReply();
+  addNote('말투를 저장했어요. 다음 대답부터 적용돼요.');
+};
+
+ipcRenderer.on('talk-focus', () => { if (PART === 'input') input.focus(); });
+// 입력칸 창에서 보낸 말 → 말풍선 창이 이번 턴으로 기록
+ipcRenderer.on('talk-user', (ev, text) => { if (PART === 'reply') turn = { user: text, bot: '' }; });
 
 // ---------- 입력 ----------
 async function send() {
   const text = input.value.trim();
   if (!text || busy) return;
-  turn = { user: text, bot: '' };
   input.value = '';
   autosize();
   const err = await ipcRenderer.invoke('agent-send', text);
-  if (err) { addNote(err, true); turn = null; }
+  if (err) input.value = text;
 }
 function autosize() {
   input.style.height = 'auto';
@@ -195,6 +261,7 @@ $('send').onclick = send;
 $('stop').onclick = () => ipcRenderer.send('agent-stop');
 $('closeBtn').onclick = () => ipcRenderer.send('talk-hide');
 $('histBtn').onclick = () => {
+  document.body.classList.remove('show-persona');
   const on = !document.body.classList.contains('show-history');
   document.body.classList.toggle('show-history', on);
   $('histBtn').textContent = on ? '지금 대화' : '지난 대화';
@@ -203,5 +270,5 @@ $('histBtn').onclick = () => {
 
 ipcRenderer.invoke('talk-state').then((st) => {
   setBusy(st.busy);
-  input.focus();
+  if (PART === 'input') input.focus();
 });

@@ -19,6 +19,10 @@
       color: var(--ink); user-select: none;
     }
     .solid { pointer-events: auto; }
+    /* 창 두 개가 같은 페이지를 쓴다: ?part=input (발밑 입력칸) / ?part=reply (옆 말풍선) */
+    body.part-input { padding: 6px 10px 12px; }
+    body.part-input #tools, body.part-input #history, body.part-input #reply { display: none !important; }
+    body.part-reply #composer { display: none; }
 
     /* 지난 대화 */
     #history {
@@ -28,6 +32,32 @@
     }
     body.show-history #history { display: block; }
     body.show-history #reply { display: none; }
+
+    /* 말투(지침) 편집 */
+    #persona {
+      display: none; flex-direction: column; gap: 8px; padding: 12px 14px; border-radius: 18px;
+      background: var(--paper); border: 2px solid var(--blue-soft); box-shadow: 0 6px 18px #5f7cf533;
+    }
+    body.show-persona #persona { display: flex; }
+    body.show-persona #reply, body.show-persona #history { display: none !important; }
+    .p-title { font-weight: 700; }
+    .p-help { font-size: 12px; color: var(--ink-soft); }
+    #personaText {
+      height: 190px; max-height: none; padding: 8px 10px; border-radius: 12px; border: 2px solid var(--line);
+      background: #fff; font-size: 13px; line-height: 1.5;
+    }
+    #personaText:focus { border-color: var(--blue-soft); }
+
+    /* 머리 위에 뜰 때: 꼬리가 아래(머리) 쪽 */
+    body.side-top #reply { overflow: visible; }
+    body.side-top #reply { max-height: calc(100vh - 60px); }
+    body.side-top #reply .text { max-height: calc(100vh - 86px); overflow-y: auto; }
+    body.side-top #reply::after {
+      content: ""; position: absolute; left: 50%; bottom: -8px; margin-left: -6px; width: 12px; height: 12px;
+      background: #fff; border-right: 2px solid var(--blue-soft); border-bottom: 2px solid var(--blue-soft);
+      transform: rotate(45deg);
+    }
+    body.side-top { padding-bottom: 16px; }
     .h-user { text-align: right; margin: 8px 0 2px; }
     .h-user span { display: inline-block; padding: 4px 10px; border-radius: 12px; color: #fff; background: linear-gradient(135deg, var(--blue), var(--pink)); max-width: 90%; text-align: left; white-space: pre-wrap; word-break: break-word; }
     .h-bot { margin: 2px 0 8px; white-space: pre-wrap; word-break: break-word; }
@@ -67,6 +97,9 @@
     button:hover { border-color: var(--blue-soft); }
     button.go { color: #fff; border: 0; padding: 6px 16px; background: linear-gradient(135deg, var(--blue), var(--pink)); box-shadow: 0 3px 10px #5f7cf544; }
 
+    .codebox input { flex: 1; min-width: 0; padding: 6px 12px; border-radius: 999px; border: 2px solid var(--line); font: inherit; color: var(--ink); outline: none; }
+    .codebox input:focus { border-color: var(--blue-soft); }
+
     /* 맨 위 작은 버튼들 */
     #tools { display: flex; justify-content: flex-end; gap: 6px; opacity: 0; transition: opacity .15s; }
     body:hover #tools, body.show-history #tools { opacity: 1; }
@@ -95,10 +128,22 @@
 </head>
 <body>
   <div id="tools" class="solid">
+    <button id="personaBtn" title="캐릭터 이름·말투·호칭 정하기">말투</button>
     <button id="histBtn" title="지난 대화">지난 대화</button>
     <button id="closeBtn" title="닫기 (Esc)">닫기</button>
   </div>
   <div id="history" class="solid"></div>
+  <div id="persona" class="solid">
+    <div class="p-title">🗣 캐릭터 말투 · 지침</div>
+    <div class="p-help">이름, 말투, 나를 부르는 호칭, 성격처럼 캐릭터가 지킬 것을 자유롭게 적어 주세요. 다음 대답부터 바로 적용돼요.</div>
+    <textarea id="personaText" spellcheck="false" placeholder="예)
+이름: 미쿠
+말투: 밝고 장난기 있는 반말. 기분 좋을 땐 문장 끝에 ♪
+나를 부르는 말: 마스터
+성격: 노래를 좋아하고, 일이 끝나면 꼭 칭찬해 줘
+대답은 두세 문장으로 짧게"></textarea>
+    <div class="row"><button id="personaCancel">닫기</button><button id="personaSave" class="go">저장</button></div>
+  </div>
   <div id="reply" class="solid"><div class="text"></div></div>
   <div id="composer" class="solid">
     <textarea id="input" rows="1" placeholder="말 걸기…"></textarea>

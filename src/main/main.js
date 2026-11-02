@@ -122,6 +122,7 @@ function createMascotWindow(id, { index = 0, anchor = null } = {}) {
 
   // 足元の位置を覚える（次の起動で同じ場所に出す）
   win.on('move', () => {
+    if (m.lifting) return;   // 말 걸기 중 잠깐 들어 올린 위치는 저장하지 않음
     const b = win.getBounds();
     store.setAnchor(id, { x: Math.round(b.x + b.width / 2), bottom: b.y + b.height });
   });
@@ -497,6 +498,7 @@ onMascot('resize-window', (m, { width, height }) => {
 
 // ドラッグ移動（固定モード中は枠内にクランプ）
 onMascot('move-window', (m, { mouseX, mouseY }) => {
+  if (m.lifting) { m.lifting = false; talk.lifted = null; }   // 직접 옮기면 그 자리가 새 위치
   const { x, y } = screen.getCursorScreenPoint();
   const c = clampPosition(m, x - mouseX, y - mouseY);
   m.win.setPosition(c.x, c.y);
@@ -753,15 +755,15 @@ const MODELS = [
   ['claude-sonnet-5-5', 'Sonnet 5.5'],
   ['claude-opus-5-5', 'Opus 5.5 (어려운 일)']
 ];
-let talkWindow = null;
-let agentConf = { cwd: '', model: DEFAULT_MODEL };
+const talk = { reply: null, input: null, lifted: null, hasReply: false };   // 답변 말풍선 창 / 발밑 입력칸 창
+let agentConf = { cwd: '', model: DEFAULT_MODEL, persona: '' };
 const agentConfFile = () => path.join(app.getPath('userData'), 'agent.json');
 const defaultWorkDir = () => path.join(app.getPath('home'), 'Claude작업');
 
 function loadAgentConf() {
   let j = {};
   try { j = JSON.parse(fs.readFileSync(agentConfFile(), 'utf8')); } catch { /* 처음 */ }
-  const conf = { cwd: j.cwd && fs.existsSync(j.cwd) ? j.cwd : defaultWorkDir(), model: j.model || DEFAULT_MODEL };
+  const conf = { cwd: j.cwd && fs.existsSync(j.cwd) ? j.cwd : defaultWorkDir(), model: j.model || DEFAULT_MODEL, persona: typeof j.persona === 'string' ? j.persona : '' };
   try { fs.mkdirSync(conf.cwd, { recursive: true }); } catch (e) { console.error('[agent] 작업 폴더를 만들 수 없음:', e.message); }
   return conf;
 }
@@ -770,62 +772,120 @@ function saveAgentConf() {
   try { fs.writeFileSync(agentConfFile(), JSON.stringify(agentConf, null, 2)); } catch (e) { console.error('[agent] 설정 저장 실패:', e.message); }
 }
 
-const sendTalk = (ch, msg) => { if (talkWindow && !talkWindow.isDestroyed()) talkWindow.webContents.send(ch, msg); };
+const alive = (w) => w && !w.isDestroyed();
+const sendTalk = (ch, msg) => { for (const w of [talk.reply, talk.input]) if (alive(w)) w.webContents.send(ch, msg); };
 
 const agent = createAgent({
   getOptions: () => agentConf,
   onEvent: (e) => {
-    const talkOpen = !!talkWindow && !talkWindow.isDestroyed() && talkWindow.isVisible();
+    const talkOpen = (alive(talk.input) && talk.input.isVisible()) || (alive(talk.reply) && talk.reply.isVisible());
     sendTalk('agent-event', e);
-    if (e.type === 'permission' && !talkOpen) showTalk(false);   // 승인은 말풍선 안의 버튼으로 받는다
-    primaryMascot()?.win.webContents.send('agent-event', { ...e, talkOpen });
+    if (e.type === 'permission') showReply(false);   // 승인은 말풍선 안의 버튼으로 받는다
+    primaryMascot()?.win.webContents.send('agent-event', { ...e, talkOpen: talkOpen || e.type === 'permission' });
   }
 });
 
-// 캐릭터(대표) 왼쪽에 붙이고, 자리가 없으면 오른쪽
-const TALK_W = 360, TALK_H = 520;
-function placeTalk() {
-  const pm = primaryMascot();
-  if (!talkWindow || talkWindow.isDestroyed() || !pm) return;
+// 입력칸은 캐릭터 발밑 가운데, 답변 말풍선은 캐릭터 옆(왼쪽, 자리가 없으면 오른쪽).
+// 발밑에 자리가 없으면 말 거는 동안만 캐릭터를 들어 올린다.
+const IN_W = 340, IN_H = 64, RE_W = 360, RE_H = 440;
+function mascotBox(pm) {
   const b = pm.win.getBounds();
   const ins = pm.inset || { left: 0, top: 0, right: b.width, bottom: b.height };
-  const wa = screen.getDisplayMatching(b).workArea;
-  let x = Math.round(b.x + ins.left - TALK_W + 30);
-  if (x < wa.x) { x = Math.round(b.x + ins.right - 30); }
-  x = Math.min(Math.max(wa.x, x), wa.x + wa.width - TALK_W);
-  const y = Math.min(Math.max(wa.y, Math.round(b.y + ins.bottom - TALK_H)), wa.y + wa.height - TALK_H);
-  talkWindow.setBounds({ x, y, width: TALK_W, height: TALK_H });
+  return { b, ins, feet: b.y + ins.bottom, cx: b.x + (ins.left + ins.right) / 2, wa: screen.getDisplayMatching(b).workArea };
 }
 
-function createTalkWindow() {
-  talkWindow = new BrowserWindow({
-    width: TALK_W, height: TALK_H, show: false,
+function placeTalk() {
+  const pm = primaryMascot();
+  if (!pm) return;
+  const { b, ins, feet, cx, wa } = mascotBox(pm);
+  const clampX = (x, w) => Math.round(Math.min(Math.max(wa.x, x), wa.x + wa.width - w));
+  if (alive(talk.input)) {
+    const y = Math.min(feet + 2, wa.y + wa.height - IN_H);
+    talk.input.setBounds({ x: clampX(cx - IN_W / 2, IN_W), y, width: IN_W, height: IN_H });
+  }
+  if (alive(talk.reply)) {
+    // 머리 위 가운데(머리 위 공간만큼만 높이를 씀). 머리 위가 너무 좁으면 옆(왼쪽, 안 되면 오른쪽)
+    const head = b.y + ins.top + 10;
+    const room = head - wa.y;
+    let x = cx - RE_W / 2, h = Math.min(RE_H, room), y = head - h, side = 'top';
+    if (room < 170) {
+      side = 'side';
+      h = RE_H;
+      x = b.x + ins.left - RE_W + 30;
+      if (x < wa.x) x = b.x + ins.right - 30;
+      y = Math.min(Math.max(wa.y, Math.round(feet - RE_H + 10)), wa.y + wa.height - RE_H);
+    }
+    talk.reply.setBounds({ x: clampX(x, RE_W), y: Math.round(y), width: RE_W, height: Math.round(h) });
+    if (talk.side !== side) { talk.side = side; talk.reply.webContents.send('talk-side', side); }
+  }
+}
+
+// 발밑 자리 만들기 / 되돌리기
+function liftMascot() {
+  const pm = primaryMascot();
+  if (!pm || talk.lifted) return;
+  const { feet, wa } = mascotBox(pm);
+  const need = feet + 2 + IN_H - (wa.y + wa.height);
+  if (need <= 0) return;
+  const [x, y] = pm.win.getPosition();
+  talk.lifted = { id: pm.id, x, y };
+  pm.lifting = true;
+  pm.win.setPosition(x, y - need);
+}
+function dropMascot() {
+  const l = talk.lifted;
+  talk.lifted = null;
+  const m = l && mascots.get(l.id);
+  if (!m || m.win.isDestroyed() || !m.lifting) return;
+  m.lifting = false;
+  m.win.setPosition(l.x, l.y);
+}
+
+function makeTalkWindow(part, w, h) {
+  const win = new BrowserWindow({
+    width: w, height: h, show: false,
     transparent: true, frame: false, hasShadow: false, resizable: false,
     alwaysOnTop: true, skipTaskbar: true, minimizable: false, roundedCorners: false,
     webPreferences: { nodeIntegration: true, contextIsolation: false }
   });
-  talkWindow.setAlwaysOnTop(true, 'screen-saver');
-  if (process.platform === 'darwin') talkWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
-  talkWindow.loadFile(path.join(__dirname, '../renderer/talk.html'));
-  talkWindow.on('closed', () => { talkWindow = null; });
+  win.setAlwaysOnTop(true, 'screen-saver');
+  if (process.platform === 'darwin') win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
+  win.loadFile(path.join(__dirname, '../renderer/talk.html'), { query: { part } });
+  return win;
+}
+
+const whenLoaded = (win, fn) => (win.webContents.isLoading() ? win.webContents.once('did-finish-load', fn) : fn());
+
+function showReply(focus = false) {
+  if (!alive(talk.reply)) talk.reply = makeTalkWindow('reply', RE_W, RE_H);
+  talk.hasReply = true;
+  placeTalk();
+  whenLoaded(talk.reply, () => { if (focus) talk.reply.show(); else talk.reply.showInactive(); });
 }
 
 function showTalk(focus = true) {
-  if (!talkWindow || talkWindow.isDestroyed()) createTalkWindow();
+  if (!alive(talk.input)) talk.input = makeTalkWindow('input', IN_W, IN_H);
+  if (!alive(talk.reply)) talk.reply = makeTalkWindow('reply', RE_W, RE_H);
+  liftMascot();
   placeTalk();
-  const go = () => {
-    if (focus) { talkWindow.show(); talkWindow.focus(); sendTalk('talk-focus'); } else talkWindow.showInactive();
-  };
-  if (talkWindow.webContents.isLoading()) talkWindow.webContents.once('did-finish-load', go); else go();
+  whenLoaded(talk.input, () => {
+    if (focus) { talk.input.show(); talk.input.focus(); sendTalk('talk-focus'); } else talk.input.showInactive();
+  });
+  if (talk.hasReply) whenLoaded(talk.reply, () => talk.reply.showInactive());
+}
+
+function hideTalk() {
+  for (const w of [talk.input, talk.reply]) if (alive(w)) w.hide();
+  dropMascot();
 }
 
 function toggleTalk() {
-  if (talkWindow && !talkWindow.isDestroyed() && talkWindow.isVisible() && talkWindow.isFocused()) talkWindow.hide();
+  if (alive(talk.input) && talk.input.isVisible() && talk.input.isFocused()) hideTalk();
   else showTalk(true);
 }
 
 // 캐릭터가 움직이면 따라간다
-setInterval(() => { if (talkWindow && !talkWindow.isDestroyed() && talkWindow.isVisible()) placeTalk(); }, 120);
+setInterval(() => { if ((alive(talk.input) && talk.input.isVisible()) || (alive(talk.reply) && talk.reply.isVisible())) placeTalk(); }, 120);
 
 function startTalk() {
   agentConf = loadAgentConf();
@@ -855,12 +915,25 @@ function newConversation() {
   sendTalk('talk-reset', { note: '새 대화를 시작해요' });
 }
 
+let loginRun = null;
 async function doLogin() {
+  if (loginRun) loginRun.cancel();
+  showReply(false);
   sendTalk('agent-event', { type: 'loginStart' });
-  const ok = await login({ onUrl: (url) => shell.openExternal(url) });
-  sendTalk('agent-event', { type: 'loginDone', ok });
+  const run = loginRun = login({
+    onUrl: (url) => sendTalk('agent-event', { type: 'loginUrl', url }),
+    onNeedCode: () => sendTalk('agent-event', { type: 'loginNeedCode' })
+  });
+  const { ok, error } = await run.done;
+  if (loginRun === run) loginRun = null;
+  if (loginRun && loginRun !== run) return;   // 다시 시도 중
+  sendTalk('agent-event', { type: 'loginDone', ok, error });
   primaryMascot()?.win.webContents.send('agent-event', { type: 'loginDone', ok });
 }
+ipcMain.handle('persona-get', () => agentConf.persona);
+ipcMain.handle('persona-set', (event, text) => { agentConf.persona = String(text || '').slice(0, 4000); saveAgentConf(); return true; });
+ipcMain.on('agent-login-code', (event, code) => loginRun?.sendCode(code));
+ipcMain.on('open-url', (event, url) => { if (/^https:\/\/[a-z0-9.-]*claude\.(ai|com)\//i.test(url)) shell.openExternal(url); });
 
 // 메뉴(캐릭터 우클릭·트레이)에 넣는 Claude 항목
 function claudeMenu() {
@@ -874,6 +947,7 @@ function claudeMenu() {
       { label: `📁 작업 폴더: ${path.basename(agentConf.cwd || '')}`, enabled: !agent.busy, click: changeWorkDir },
       { label: '📂 작업 폴더 열기', click: () => shell.openPath(agentConf.cwd) },
       { type: 'separator' },
+      { label: '🗣 캐릭터 말투(지침)', click: () => { showTalk(true); showReply(true); whenLoaded(talk.reply, () => talk.reply.webContents.send('talk-persona')); } },
       { label: '🔑 Claude 계정 로그인', click: doLogin }
     ]
   };
@@ -884,6 +958,8 @@ ipcMain.handle('agent-send', async (event, text) => {
   if (!t) return null;
   if (agent.busy) return '이미 작업 중이에요';
   try { fs.mkdirSync(agentConf.cwd, { recursive: true }); } catch { /* 아래에서 알림 */ }
+  showReply(false);
+  sendTalk('talk-user', t);
   agent.send(t).catch((e) => {
     const ev = { type: 'error', message: e.message };
     sendTalk('agent-event', ev);
@@ -894,8 +970,8 @@ ipcMain.handle('agent-send', async (event, text) => {
 ipcMain.on('agent-answer', (event, { id, allow }) => agent.answer(id, allow));
 ipcMain.on('agent-stop', () => agent.stop());
 ipcMain.on('agent-login', () => doLogin());
-ipcMain.on('talk-hide', () => talkWindow?.hide());
-ipcMain.on('talk-ignore-mouse', (event, ignore) => talkWindow?.setIgnoreMouseEvents(ignore, { forward: true }));
+ipcMain.on('talk-hide', () => hideTalk());
+ipcMain.on('talk-ignore-mouse', (event, ignore) => BrowserWindow.fromWebContents(event.sender)?.setIgnoreMouseEvents(ignore, { forward: true }));
 ipcMain.handle('talk-state', () => ({ model: agentConf.model, cwd: agentConf.cwd, busy: agent.busy, shortcut: TALK_SHORTCUT }));
 // 캐릭터 더블클릭 / 승인 대기 중 클릭
 onMascot('agent-open', () => showTalk(true));
@@ -903,6 +979,7 @@ onMascot('agent-answer', (m, { id, allow }) => agent.answer(id, allow));
 
 app.on('before-quit', () => {
   app.isQuitting = true;
+  dropMascot();
   agent.stop();
   globalShortcut.unregisterAll();
   store?.flush();
