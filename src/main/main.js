@@ -1004,7 +1004,7 @@ function startTalk() {
 
 // ===== 같이 공부 모드 (Claude 앱 창을 읽고 한두 마디 거듦) =====
 function studyNeedsPermission() {
-  mascotSay('Claude 창을 읽으려면 손쉬운 사용 권한이 필요해요. 시스템 설정에서 이 앱을 켜 주세요!');
+  mascotSay('손쉬운 사용 권한이 안 맞아요. 목록에서 이 앱을 골라 [−]로 지우고, [+]로 다시 넣은 뒤 앱을 껐다 켜 주세요 (업데이트하면 Mac이 다른 앱으로 봐요)');
   shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility');
 }
 function setStudy(on) {
