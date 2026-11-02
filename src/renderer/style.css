@@ -1,0 +1,56 @@
+* {
+  box-sizing: border-box;
+  user-select: none;
+  margin: 0;
+  padding: 0;
+}
+
+body, html {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+  font-family: 'Segoe UI', 'Yu Gothic UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+#stage {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* 吹き出し */
+#bubble {
+  position: absolute;
+  left: 50%;
+  top: 8px;
+  transform: translateX(-50%) translateY(6px);
+  max-width: calc(100% - 24px);
+  width: max-content;
+  padding: 8px 14px;
+  background: rgba(255, 255, 255, 0.96);
+  color: #222;
+  border-radius: 12px;
+  font-size: 13px;
+  line-height: 1.5;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  opacity: 0;
+  transition: opacity 0.2s, transform 0.2s;
+  pointer-events: none;
+  z-index: 10000;
+  white-space: pre-wrap;
+}
+#bubble.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+#bubble::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -7px;
+  margin-left: -7px;
+  border: 7px solid transparent;
+  border-bottom: 0;
+  border-top-color: rgba(255, 255, 255, 0.96);
+}

@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>마스코트 설정</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      background: #252526;
+      color: #ccc;
+      font-family: 'Segoe UI', 'Yu Gothic UI', Tahoma, sans-serif;
+      font-size: 13px;
+    }
+    body { padding: 16px; }
+
+    .setting-group { margin-bottom: 16px; }
+    .setting-label { display: block; margin-bottom: 6px; color: #aaa; }
+    .setting-label .val { float: right; color: #777; font-variant-numeric: tabular-nums; }
+
+    select, input[type="range"] {
+      width: 100%;
+      background: #3c3c3c;
+      border: 1px solid #555;
+      color: #fff;
+      padding: 6px;
+      border-radius: 4px;
+      outline: none;
+      font: inherit;
+    }
+    input[type="range"] { padding: 0; accent-color: #4ea1ff; }
+    select:focus { border-color: #4ea1ff; }
+    optgroup { color: #888; }
+    option { color: #fff; }
+
+    .button-row { display: flex; gap: 6px; }
+    .button-row select { flex: 2; }
+    .button-row button.narrow { flex: 0 0 34px; font-size: 14px; padding: 3px 0; }
+    button {
+      flex: 1;
+      background: #3c3c3c;
+      border: 1px solid #555;
+      color: #fff;
+      padding: 5px 8px;
+      border-radius: 4px;
+      cursor: pointer;
+      font: inherit;
+      font-size: 12px;
+    }
+    button:hover { background: #4a4a4a; }
+    button:disabled { opacity: 0.4; cursor: default; }
+
+    .check-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; cursor: pointer; }
+    .check-row.disabled { opacity: 0.45; cursor: default; }
+    .shared { color: #777; font-size: 11px; }
+    .character-group { padding-bottom: 12px; }
+    .credit { margin-top: 4px; font-size: 11px; color: #888; }
+    .hint { font-size: 11px; color: #777; margin-top: 4px; }
+    .mt { margin-top: 6px; }
+    h2 { font-size: 12px; font-weight: 600; color: #4ea1ff; margin: 18px 0 10px; display: flex; align-items: center; gap: 8px; }
+    h2::after { content: ''; flex: 1; height: 1px; background: #3a3a3a; }
+    h2.common { color: #aaa; margin-top: 24px; }
+    .button-row button.side, .label-row button.side { flex: 0 0 auto; padding: 5px 12px; }
+    .label-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+    .label-row .setting-label { margin: 0; }
+
+    /* モデル一覧（エクスプローラ風）。列数は窓の幅で変わる */
+    .model-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+      gap: 8px;
+      max-height: 330px;
+      overflow-y: auto;
+      padding: 6px;
+      background: #1e1e1e;
+      border: 1px solid #3a3a3a;
+      border-radius: 4px;
+    }
+    .model-grid .group { grid-column: 1 / -1; font-size: 11px; color: #777; margin-top: 2px; }
+    .model-tile {
+      background: none; border: 1px solid transparent; border-radius: 6px;
+      padding: 4px; color: #ccc; display: flex; flex-direction: column; align-items: center; gap: 4px;
+      font-size: 11px; min-width: 0;
+    }
+    .model-tile:hover { background: #2d2d2d; }
+    .model-tile.selected { border-color: #4ea1ff; background: #264f78; color: #fff; }
+    .model-tile.drop { border: 1px dashed #4ea1ff; background: #2d3b4a; }
+    .model-tile .thumb { width: 100%; aspect-ratio: 1; border-radius: 4px; overflow: hidden; background: #333; display: grid; place-items: center; }
+    .model-tile .thumb img { width: 100%; height: 100%; object-fit: cover; }
+    .model-tile .name {
+      width: 100%; text-align: center; line-height: 1.3; word-break: break-all;
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+    }
+    /* サムネが無いモデルは頭文字 */
+    .initial { font-size: 26px; font-weight: 600; color: #888; }
+    .mini-thumb { flex: 0 0 34px; height: 34px; border-radius: 4px; overflow: hidden; background: #333; display: grid; place-items: center; }
+    .mini-thumb img { width: 100%; height: 100%; object-fit: cover; }
+    .mini-thumb .initial { font-size: 15px; }
+  </style>
+</head>
+<body>
+
+  <div class="setting-group character-group">
+    <label class="setting-label">캐릭터</label>
+    <div class="button-row">
+      <div id="character-thumb" class="mini-thumb"></div>
+      <select id="character-select"></select>
+      <button id="btn-add-character" class="narrow" title="캐릭터 추가">＋</button>
+      <button id="btn-remove-character" class="narrow" title="이 캐릭터 삭제">−</button>
+    </div>
+    <div class="hint">여기서부터 아래는 이 캐릭터에만 적용되는 설정입니다(우클릭으로도 바꿀 수 있어요). VS Code 이벤트와 시보는 대표(1번)만 해당</div>
+  </div>
+
+  <h2>외형</h2>
+
+  <div class="setting-group">
+    <div class="label-row">
+      <label class="setting-label">모델</label>
+      <button id="btn-import-model" class="side" title="ZIP / .vrm / 폴더를 라이브러리에 넣고 이 캐릭터에 사용합니다. 같은 이름은 덮어씁니다. 캐릭터 위에 드롭해도 같습니다">가져오기…</button>
+    </div>
+    <div id="model-grid" class="model-grid"></div>
+    <div class="hint">라이브러리 모델은 타일에 이미지(PNG·JPEG·WebP)를 드롭하면 썸네일을 지정할 수 있어요</div>
+    <div class="button-row mt">
+      <button id="btn-select-file" title="가져오지 않고 있는 위치 그대로 불러옵니다">파일 직접 열기…</button>
+      <button id="btn-remove-model">라이브러리에서 삭제</button>
+    </div>
+  </div>
+
+  <div class="setting-group">
+    <label class="setting-label">크기 <span class="val" id="height-val"></span></label>
+    <input type="range" id="height-range" min="200" max="1000" step="10">
+    <div class="hint">캐릭터 위에서 Ctrl+휠로도 변경할 수 있어요</div>
+  </div>
+
+  <div class="setting-group">
+    <label class="setting-label">불투명도 <span class="val" id="opacity-val"></span></label>
+    <input type="range" id="opacity-range" min="0.2" max="1.0" step="0.05">
+  </div>
+
+  <div class="setting-group">
+    <label class="check-row"><input type="checkbox" id="gaze-check">시선 추적</label>
+  </div>
+
+  <h2>음성</h2>
+
+  <div class="setting-group">
+    <label class="setting-label">말하는 방식</label>
+    <div class="button-row">
+      <select id="voice-mode-select">
+        <option value="pack">보이스팩만</option>
+        <option value="voicevox">VOICEVOX</option>
+        <option value="os">보이스팩 + OS 음성</option>
+        <option value="mute">음소거(자막만)</option>
+      </select>
+      <button id="btn-test-tts" class="side">미리듣기</button>
+    </div>
+    <div class="hint" id="voice-mode-hint"></div>
+    <div id="voicevox-settings" class="mt">
+      <select id="speaker-select"></select>
+      <label class="setting-label mt">말 속도 <span class="val" id="speed-val"></span></label>
+      <input type="range" id="speed-range" min="0.7" max="1.6" step="0.05">
+      <div id="voicevox-credit" class="credit"></div>
+    </div>
+  </div>
+
+  <div class="setting-group">
+    <label class="setting-label">보이스팩 <span class="shared">클릭·랜덤 대사 모음</span></label>
+    <div class="button-row">
+      <select id="voice-pack-select"></select>
+      <button id="btn-test-voice" class="side">미리듣기</button>
+    </div>
+  </div>
+
+  <h2>동작</h2>
+
+  <div class="setting-group">
+    <label class="check-row"><input type="checkbox" id="events-check">랜덤 이벤트</label>
+    <label class="check-row" id="chime-row"><input type="checkbox" id="chime-check">시보(정각 알림)<span class="shared" id="chime-note"></span></label>
+    <label class="check-row" id="follow-row"><input type="checkbox" id="follow-check" title="VS Code 창 안에서만 움직입니다">VS Code 따라가기<span class="shared" id="follow-note"></span></label>
+  </div>
+
+  <h2 class="common">모든 캐릭터 공통</h2>
+
+  <div class="setting-group">
+    <div class="button-row">
+      <button id="btn-open-library" title="가져온 모델이 저장되는 위치">라이브러리 열기</button>
+      <button id="btn-open-motions" title="VRM용 모션(.vrma)이 저장되는 위치. idle로 시작하는 이름은 대기 모션, 그 외는 동작 모션입니다">모션 열기</button>
+    </div>
+  </div>
+
+  <script src="settings.js"></script>
+</body>
+</html>

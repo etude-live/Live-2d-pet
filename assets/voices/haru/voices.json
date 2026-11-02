@@ -1,0 +1,89 @@
+{
+  "name": "Haru",
+  "credit": "Live2D Inc. sample data",
+  "voices": [
+    {
+      "file": "../../haru/sounds/haru_normal_01.wav",
+      "text": "수고하셨어요",
+      "motion": "haru_normal_01",
+      "on": [
+        "idle",
+        "greet"
+      ]
+    },
+    {
+      "file": "../../haru/sounds/haru_normal_02.wav",
+      "text": "뭐 묻었나요?",
+      "motion": "haru_normal_02",
+      "on": [
+        "click"
+      ]
+    },
+    {
+      "file": "../../haru/sounds/haru_normal_03.wav",
+      "text": "앗, 깜짝이야",
+      "motion": "haru_normal_03",
+      "on": [
+        "click"
+      ]
+    },
+    {
+      "file": "../../haru/sounds/haru_normal_04.wav",
+      "text": "응? 뭐예요?",
+      "motion": "haru_normal_04",
+      "on": [
+        "click"
+      ]
+    },
+    {
+      "file": "../../haru/sounds/haru_normal_05.wav",
+      "text": "만지고 싶어요?",
+      "motion": "haru_normal_05",
+      "on": [
+        "click"
+      ]
+    },
+    {
+      "file": "../../haru/sounds/haru_normal_06.wav",
+      "text": "(웃음)",
+      "motion": "haru_normal_06",
+      "on": [
+        "click",
+        "idle"
+      ]
+    },
+    {
+      "file": "../../haru/sounds/haru_normal_07.wav",
+      "text": "왜, 왜 그러세요?",
+      "motion": "haru_normal_07",
+      "on": [
+        "click"
+      ]
+    },
+    {
+      "file": "../../haru/sounds/haru_normal_08.wav",
+      "text": "와, 뭐 하시는 거예요~",
+      "motion": "haru_normal_08",
+      "on": [
+        "click"
+      ]
+    },
+    {
+      "file": "../../haru/sounds/haru_normal_09.wav",
+      "text": "오늘은 뭐 먹을까",
+      "motion": "haru_normal_09",
+      "on": [
+        "idle"
+      ]
+    },
+    {
+      "file": "../../haru/sounds/haru_normal_10.wav",
+      "text": "후후. 아뇨, 아무것도 아니에요. (웃음)",
+      "motion": "haru_normal_10",
+      "on": [
+        "idle",
+        "click"
+      ]
+    }
+  ]
+}

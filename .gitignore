@@ -1,0 +1,39 @@
+# 依存・ビルド成果物
+node_modules/
+dist/
+out/
+
+# Live2D の再配布物（各自で公式から取得して配置する）
+vendor/*
+!vendor/README.md
+assets/*
+!assets/voices/
+!assets/motions/
+!assets/tray.png
+
+# npm install 時に node_modules からコピーされる（scripts/copy-three-addons.js）
+src/renderer/vendor/
+
+# エディタ・拡張機能
+.history/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/launch.json
+*.code-workspace
+*.vsix
+*.zip
+*.patch
+
+# ログ・一時ファイル
+*.log
+npm-debug.log*
+.env
+.env.*
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# projectマップ🤖
+docs/PROJECT_MAP.md
