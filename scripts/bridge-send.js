@@ -5,6 +5,7 @@
 //   node scripts/bridge-send.js diagnostics errors=0 errors=3 errors=0
 //   node scripts/bridge-send.js taskEnd name=build,exitCode=1
 //   node scripts/bridge-send.js debugStart
+//   node scripts/bridge-send.js command '{"name":"pomodoro.toggle"}'   (명령 목록: docs/STREAMDECK.md)
 //
 // payload は key=value をカンマ区切り（数値・true/false は変換）。JSON（{...}）もそのまま使える。
 // say だけは、ただの文字列を text として扱う。
@@ -75,6 +76,7 @@ ws.on('unexpected-response', (req, res) => { console.error('拒否されまし�
 
 ws.on('message', async (data) => {
   const msg = JSON.parse(data.toString());
+  if (msg.type === 'result') { console.log('result:', msg.payload); return; }   // command 의 결과
   if (msg.type !== 'welcome') return;
   console.log('welcome:', msg.payload);
   for (let i = 0; i < payloads.length; i++) {
@@ -83,5 +85,5 @@ ws.on('message', async (data) => {
     ws.send(JSON.stringify({ v: 1, type, payload, ts: Date.now() }));
     console.log('sent:', type, payload);
   }
-  setTimeout(() => ws.close(), 300);
+  setTimeout(() => ws.close(), type === 'command' ? 3000 : 300);   // command 는 결과를 기다림
 });

@@ -288,7 +288,11 @@ function createAgent({ onEvent, getOptions, getMemory = () => '', buildTools, on
     usedPersona = persona;
     const done = new Promise((resolve) => { turn = { resolve, stopped: false, text, meta }; });
     running = { live };
-    live.input.push({ type: 'user', message: { role: 'user', content: prompt }, parent_tool_use_id: null });
+    // 화면 캡처 등 이미지가 붙으면 이미지 블록 + 글
+    const content = meta.images?.length
+      ? [...meta.images.map((im) => ({ type: 'image', source: { type: 'base64', media_type: im.mediaType, data: im.data } })), { type: 'text', text: prompt }]
+      : prompt;
+    live.input.push({ type: 'user', message: { role: 'user', content }, parent_tool_use_id: null });
     return done;
   }
 

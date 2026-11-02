@@ -106,6 +106,9 @@
     button.mini:hover { opacity: 1; }
     .reminder { font-weight: 700; font-size: 15px; text-align: center; padding: 4px 0; }
     #composer.drop { background: linear-gradient(#f1f3ff, #f1f3ff) padding-box, linear-gradient(120deg, var(--blue), var(--pink)) border-box; }
+    #attach { display: none; align-items: center; gap: 2px; flex: none; }
+    #attach img { height: 30px; border-radius: 6px; border: 1px solid var(--line); }
+    #attachX { width: 20px; height: 20px; padding: 0; font-size: 10px; line-height: 1; }
     .codebox input { flex: 1; min-width: 0; padding: 6px 12px; border-radius: 999px; border: 2px solid var(--line); font: inherit; color: var(--ink); outline: none; }
     .codebox input:focus { border-color: var(--blue-soft); }
 
@@ -156,6 +159,7 @@
   </div>
   <div id="reply" class="solid"><div class="text"></div></div>
   <div id="composer" class="solid">
+    <div id="attach" title="첨부한 화면"><img alt=""><button id="attachX" title="빼기">✕</button></div>
     <textarea id="input" rows="1" placeholder="말 걸기…"></textarea>
     <button id="send" title="보내기 (Enter)">↑</button>
     <button id="stop" title="멈추기">■</button>

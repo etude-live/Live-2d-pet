@@ -76,12 +76,14 @@ async function startBridge({ dir, port = 0, version, onEvent }) {
 
   // 接続ごとに番号を振る（VS Code はウィンドウごとに拡張ホストが立つので複数つながる）
   let seq = 0;
+  const sockets = new Map();   // client 번호 → ws
   const emit = (msg) => {
     try { onEvent(msg); } catch (e) { console.warn('[bridge] イベント処理エラー:', e); }
   };
 
   wss.on('connection', (ws) => {
     const client = ++seq;
+    sockets.set(client, ws);
     console.log(`[bridge] 接続 #${client}（${wss.clients.size}）`);
     emit({ type: 'connect', payload: {}, ts: Date.now(), client });
     ws.send(JSON.stringify({
@@ -103,6 +105,7 @@ async function startBridge({ dir, port = 0, version, onEvent }) {
     });
 
     ws.on('close', () => {
+      sockets.delete(client);
       console.log(`[bridge] 切断 #${client}（${wss.clients.size}）`);
       emit({ type: 'disconnect', payload: {}, ts: Date.now(), client });
     });
@@ -128,6 +131,15 @@ async function startBridge({ dir, port = 0, version, onEvent }) {
     info,
     file,
     clientCount: () => wss.clients.size,
+    // 한 클라이언트에게 / 모두에게 보내기 (스트림덱 등: 명령 결과·상태)
+    send(client, msg) {
+      const ws = sockets.get(client);
+      if (ws && ws.readyState === 1) ws.send(JSON.stringify({ v: PROTOCOL, ts: Date.now(), ...msg }));
+    },
+    broadcast(msg) {
+      const text = JSON.stringify({ v: PROTOCOL, ts: Date.now(), ...msg });
+      for (const ws of wss.clients) if (ws.readyState === 1) ws.send(text);
+    },
     // before-quit から同期的に呼べるよう、ファイル削除は同期で行う
     stop() {
       if (stopped) return;

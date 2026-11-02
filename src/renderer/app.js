@@ -929,6 +929,12 @@ function onAgentEvent(e) {
       playMotion();
       agentSay(AGENT.TEXT.error, 5000);
       break;
+    case 'pomodoro':   // 포모도로 단계 바뀜
+      agentUi.quiet = false;
+      if (e.phase === 'break' || e.phase === 'long' || e.phase === 'done') agentFace('done', 4000);
+      playMotion();
+      agentSay('🍅 ' + e.text, 6000);
+      break;
     case 'reminder':   // 알림은 말 걸기 창이 열려 있어도 직접 말함
       agentUi.quiet = false;
       agentFace('done', 5000);

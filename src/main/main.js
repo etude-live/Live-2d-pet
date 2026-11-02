@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, screen, dialog, shell, globalShortcut, clipboard, Notification } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, screen, dialog, shell, globalShortcut, clipboard, Notification, desktopCapturer, systemPreferences } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const tracker = require('./tracker');
@@ -12,6 +12,7 @@ const { createAgent, login } = require('./agent');
 const { checkForUpdate, startAutoUpdate, currentBuild } = require('./updater');
 const { createMemory } = require('./memory');
 const { createReminders } = require('./reminders');
+const { createPomodoro } = require('./pomodoro');
 const { z } = require('zod');
 const { thumbnailUrl, customThumb, setCustomThumb } = require('./thumbs');
 const { FORMATS, importExtensions, importLabel } = require('../shared/formats');
@@ -232,7 +233,10 @@ async function startBridgeFromConfig() {
       dir: app.getPath('userData'),
       port: config.bridge.port,
       version: app.getVersion(),
-      onEvent: (msg) => primaryMascot()?.win.webContents.send('bridge-event', msg)
+      onEvent: (msg) => {
+        if (msg.type === 'command') { handleCommand(msg.payload, msg.client); return; }   // 스트림덱 등 (docs/STREAMDECK.md)
+        primaryMascot()?.win.webContents.send('bridge-event', msg);
+      }
     });
   } catch (e) {
     console.error('[bridge] 起動できません:', e.message);
@@ -823,6 +827,8 @@ const agent = createAgent({
     if (!meta.noMemory) memory?.recordTurn(meta.label || user, result);
   },
   onEvent: (e) => {
+    const st = { start: 'working', permission: 'asking', permissionDone: 'working', idle: 'idle' }[e.type];
+    if (st) bridge?.broadcast({ type: 'agent', payload: { state: st } });
     const talkOpen = (alive(talk.input) && talk.input.isVisible()) || (alive(talk.reply) && talk.reply.isVisible());
     sendTalk('agent-event', e);
     if (e.type === 'permission') showReply(false);   // 승인은 말풍선 안의 버튼으로 받는다
@@ -942,7 +948,8 @@ function startTalk() {
   const keys = [
     [TALK_SHORTCUT, toggleTalk],
     [CLIP_KEYS.translate, () => clipAction('translate')],
-    [CLIP_KEYS.polish, () => clipAction('polish')]
+    [CLIP_KEYS.polish, () => clipAction('polish')],
+    [SCREEN_KEY, () => captureScreen()]
   ];
   for (const [k, fn] of keys) if (!globalShortcut.register(k, fn)) console.warn('[talk] 단축키 등록 실패:', k);
 }
@@ -1007,6 +1014,7 @@ ipcMain.handle('persona-get', () => agentConf.persona);
 ipcMain.handle('memory-get', () => memory?.read() || '');
 ipcMain.handle('memory-set', (event, text) => { memory?.write(String(text || '').slice(0, 4000)); return true; });
 // 입력칸에 끌어다 놓은 파일: 묻지 않고 읽게 허락
+ipcMain.on('talk-unattach', () => { talk.image = null; sendTalk('talk-attach', null); });
 ipcMain.on('talk-drop', (event, paths) => { for (const p of paths || []) agent.allowRead(p); });
 ipcMain.handle('persona-set', (event, text) => { agentConf.persona = String(text || '').slice(0, 4000); saveAgentConf(); return true; });
 ipcMain.on('agent-login-code', (event, code) => loginRun?.sendCode(code));
@@ -1026,6 +1034,8 @@ function claudeMenu() {
       { type: 'separator' },
       { label: `📋 클립보드 번역  (${process.platform === 'darwin' ? '⌘⇧1' : 'Ctrl+Shift+1'})`, click: () => clipAction('translate') },
       { label: `📋 클립보드 다듬기  (${process.platform === 'darwin' ? '⌘⇧2' : 'Ctrl+Shift+2'})`, click: () => clipAction('polish') },
+      { label: `📸 화면 보고 도와줘  (${process.platform === 'darwin' ? '⌘⇧0' : 'Ctrl+Shift+0'})`, click: () => captureScreen() },
+      { label: '🍅 포모도로 시작/끝', click: () => handleCommand({ name: 'pomodoro.toggle' }) },
       { label: '⏰ 알림 목록', click: () => { showTalk(true); showReply(false); sendTalk('agent-event', { type: 'note', text: reminders.list().map(reminders.describe).join('\n') || '맞춰 둔 알림이 없어요' }); } },
       { label: '🧠 기억 보기·고치기', click: () => { showTalk(true); showReply(true); whenLoaded(talk.reply, () => talk.reply.webContents.send('talk-memory')); } },
       { type: 'separator' },
@@ -1042,7 +1052,10 @@ ipcMain.handle('agent-send', async (event, text) => {
   try { fs.mkdirSync(agentConf.cwd, { recursive: true }); } catch { /* 아래에서 알림 */ }
   showReply(false);
   sendTalk('talk-user', t);
-  agent.send(t).catch((e) => {
+  const images = talk.image ? [talk.image] : undefined;
+  talk.image = null;
+  sendTalk('talk-attach', null);
+  agent.send(t, { images }).catch((e) => {
     const ev = { type: 'error', message: e.message };
     sendTalk('agent-event', ev);
     primaryMascot()?.win.webContents.send('agent-event', ev);
@@ -1059,8 +1072,126 @@ ipcMain.handle('talk-state', () => ({ model: agentConf.model, cwd: agentConf.cwd
 onMascot('agent-open', () => showTalk(true));
 onMascot('agent-answer', (m, { id, allow }) => agent.answer(id, allow));
 
+// ===== 화면 보고 도와주기 =====
+// 캐릭터가 있는 화면을 찍어(긴 변 1568px 이하 JPEG, 약 2천 토큰) 다음 메시지에 붙인다.
+// question 이 있으면 바로 묻는다 (스트림덱 버튼 등).
+const SCREEN_KEY = 'CommandOrControl+Shift+0';
+async function captureScreen(question) {
+  if (process.platform === 'darwin' && systemPreferences.getMediaAccessStatus('screen') !== 'granted') {
+    // 처음엔 권한 요청이 뜨도록 한 번 시도는 해 본다
+    try { await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 1, height: 1 } }); } catch { /* 무시 */ }
+    if (systemPreferences.getMediaAccessStatus('screen') !== 'granted') {
+      showTalk(false); showReply(false);
+      sendTalk('agent-event', { type: 'note', text: '화면을 보려면 권한이 필요해요. 시스템 설정 → 개인정보 보호 및 보안 → 화면 및 시스템 오디오 녹음에서 이 앱을 켜고, 앱을 다시 켜 주세요.' });
+      shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture');
+      return { ok: false, error: 'screen-permission' };
+    }
+  }
+  const pm = primaryMascot();
+  const display = pm ? screen.getDisplayMatching(pm.win.getBounds()) : screen.getPrimaryDisplay();
+  const { width, height } = display.size;
+  const k = Math.min(1, 1568 / Math.max(width, height));
+  // 말 걸기 창은 잠깐 숨기고 찍음
+  const wasOpen = alive(talk.input) && talk.input.isVisible();
+  for (const w of [talk.input, talk.reply]) if (alive(w)) w.hide();
+  await new Promise((r) => setTimeout(r, 180));
+  let img;
+  try {
+    const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: Math.round(width * k), height: Math.round(height * k) } });
+    const src = sources.find((x) => String(x.display_id) === String(display.id)) || sources[0];
+    img = src?.thumbnail;
+  } catch (e) {
+    console.warn('[screen]', e.message);
+  }
+  showTalk(true);
+  if (!img || img.isEmpty()) {
+    sendTalk('agent-event', { type: 'note', text: '화면을 찍지 못했어요.' });
+    return { ok: false, error: 'capture-failed' };
+  }
+  talk.image = { mediaType: 'image/jpeg', data: img.toJPEG(80).toString('base64') };
+  sendTalk('talk-attach', { preview: img.resize({ width: 160 }).toDataURL() });
+  if (question) {
+    return sendFromOutside(question);
+  } else if (!wasOpen) {
+    sendTalk('talk-focus');
+  }
+  return { ok: true };
+}
+
+// 밖(스트림덱 등)에서 말 걸기: 입력칸에 친 것과 똑같이 처리
+function sendFromOutside(text) {
+  const t = String(text || '').trim();
+  if (!t) return { ok: false, error: 'empty' };
+  if (agent.busy) return { ok: false, error: 'busy' };
+  showTalk(false);
+  showReply(false);
+  sendTalk('talk-user', t);
+  const images = talk.image ? [talk.image] : undefined;
+  talk.image = null;
+  sendTalk('talk-attach', null);
+  agent.send(t, { images }).catch((e) => sendTalk('agent-event', { type: 'error', message: e.message }));
+  return { ok: true };
+}
+
+// ===== 포모도로 =====
+const POMO_LINES = {
+  work: (s) => s.cycle === 1 ? `집중 시작! ${s.minutes.work}분 동안 같이 힘내요` : `다시 집중! ${s.cycle}번째예요`,
+  break: (s) => `수고했어요! ${s.minutes.break}분 쉬어요`,
+  long: (s) => `${s.cycles}번 다 했어요! ${s.minutes.long}분 푹 쉬어요`,
+  done: () => '포모도로 끝! 정말 잘했어요',
+  stopped: () => '포모도로를 멈췄어요',
+  paused: () => '잠깐 멈춤!',
+  resumed: () => '다시 시작해요!'
+};
+const fmt = (sec) => `${String(Math.floor(sec / 60)).padStart(2, '0')}:${String(sec % 60).padStart(2, '0')}`;
+const pomodoro = createPomodoro({
+  onPhase: (phase, s) => {
+    const text = (POMO_LINES[phase] || (() => ''))(s);
+    if (text) primaryMascot()?.win.webContents.send('agent-event', { type: 'pomodoro', phase, text });
+    if (['work', 'break', 'long', 'done'].includes(phase) && Notification.isSupported()) new Notification({ title: '🍅 포모도로', body: text, silent: false }).show();
+    bridge?.broadcast({ type: 'pomodoro', payload: { event: phase, ...s } });
+  },
+  onTick: (s) => {
+    tray?.setTitle(s.running ? `${s.phase === 'work' ? '🍅' : '☕'} ${fmt(s.remainingSec)}${s.paused ? ' ⏸' : ''}` : '');
+    bridge?.broadcast({ type: 'pomodoro', payload: { event: 'tick', ...s } });
+  }
+});
+
+// ===== 외부 명령 (스트림덱 플러그인 등). 형식은 docs/STREAMDECK.md =====
+async function handleCommand(payload = {}, client) {
+  const { id, name, args = {} } = payload;
+  let result;
+  try {
+    switch (name) {
+      case 'talk.open': showTalk(true); result = { ok: true }; break;
+      case 'talk.toggle': toggleTalk(); result = { ok: true }; break;
+      case 'talk.hide': hideTalk(); result = { ok: true }; break;
+      case 'talk.send': result = sendFromOutside(args.text); break;
+      case 'agent.stop': agent.stop(); result = { ok: true }; break;
+      case 'agent.newChat': newConversation(); result = { ok: true }; break;
+      case 'clip.translate': clipAction('translate'); result = { ok: true }; break;
+      case 'clip.polish': clipAction('polish'); result = { ok: true }; break;
+      case 'screen.ask': result = await captureScreen(args.question); break;
+      case 'pomodoro.start': result = { ok: true, state: pomodoro.start(args) }; break;
+      case 'pomodoro.toggle': result = { ok: true, state: pomodoro.toggle(args) }; break;
+      case 'pomodoro.stop': result = { ok: true, state: pomodoro.stop() }; break;
+      case 'pomodoro.pause': result = { ok: true, state: pomodoro.pause() }; break;
+      case 'pomodoro.skip': result = { ok: true, state: pomodoro.skip() }; break;
+      case 'reminder.list': result = { ok: true, reminders: reminders.list().map((r) => ({ id: r.id, text: r.text, at: r.at, daily: r.daily })) }; break;
+      case 'mascot.say': primaryMascot()?.win.webContents.send('bridge-event', { type: 'say', payload: { text: String(args.text || '') } }); result = { ok: true }; break;
+      case 'state.get': result = { ok: true, agent: agent.busy ? 'working' : 'idle', pomodoro: pomodoro.state(), build: currentBuild() }; break;
+      default: result = { ok: false, error: 'unknown-command' };
+    }
+  } catch (e) {
+    result = { ok: false, error: e.message };
+  }
+  if (client) bridge?.send(client, { type: 'result', payload: { id, name, ...result } });
+  return result;
+}
+
 app.on('before-quit', () => {
   app.isQuitting = true;
+  pomodoro.stop();
   dropMascot();
   agent.close();
   globalShortcut.unregisterAll();

@@ -279,6 +279,18 @@ $('personaSave').onclick = async () => {
   addNote(P.saved);
 };
 
+// ---------- 화면 캡처 첨부 표시 (입력칸) ----------
+ipcRenderer.on('talk-attach', (ev, att) => {
+  if (PART !== 'input') return;
+  const chip = $('attach');
+  if (!att) { chip.style.display = 'none'; input.placeholder = '말 걸기…'; return; }
+  chip.querySelector('img').src = att.preview;
+  chip.style.display = 'flex';
+  input.placeholder = '이 화면에서 뭘 도와줄까요? (그냥 Enter: 알아서 봐 줘)';
+  input.focus();
+});
+$('attachX').onclick = () => ipcRenderer.send('talk-unattach');
+
 // ---------- 파일 끌어다 놓기 (입력칸) ----------
 if (PART === 'input') {
   const { webUtils } = require('electron');
@@ -304,7 +316,8 @@ ipcRenderer.on('talk-user', (ev, text) => { if (PART === 'reply') turn = { user:
 
 // ---------- 입력 ----------
 async function send() {
-  const text = input.value.trim();
+  let text = input.value.trim();
+  if (!text && $('attach').style.display === 'flex') text = '이 화면 보고, 지금 내가 뭘 하는 중인지 짧게 짚고 도움이 될 만한 걸 하나 말해 줘';
   if (!text || busy) return;
   input.value = '';
   autosize();
