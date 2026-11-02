@@ -54,6 +54,7 @@
 | `reminder` | `{ text }` | 맞춰 둔 알림이 울릴 때 |
 | `usage` | `{ five_hour?: { utilization(0~1), resetsAt(ms), status }, seven_day?: {…}, … }` | Claude Pro/Max 사용량이 갱신될 때 (대화할 때마다) |
 | `mode` | `{ claude }` | Claude 모드를 켜거나 껐을 때 |
+| `expression` | `{ name }` | 표정이 바뀌었을 때 (`null` = 원래 얼굴). 버튼 켜짐 표시용 |
 | `pong` | | `{ "v":1, "type":"ping" }` 에 대한 답 |
 
 `phase`: `idle` / `work`(집중) / `break`(짧은 휴식) / `long`(긴 휴식).
@@ -79,6 +80,10 @@
 | `pomodoro.skip` | | 다음 단계로 | `state` |
 | `pomodoro.stop` | | 끝 | `state` |
 | `reminder.list` | | 알림 목록 | `reminders: [{ id, text, at(ms), daily("HH:MM"\|null) }]` |
+| `expression.list` | | 지금 모델의 표정 이름 목록 (model3.json 의 Expressions) | `expressions: [이름…]`, `current` |
+| `expression.set` | `{ name, text? }` | 그 표정으로 바꿈 (같은 걸 다시 보내면 원래 얼굴로). `text` 가 있으면 말풍선도 (토큰 0) | 없는 이름이면 `error: "no-such-expression"` |
+| `expression.reset` | | 원래 얼굴로 | |
+| `motion.play` | `{ text? }` | 몸짓 하나 (+ 말풍선) | |
 | `mascot.say` | `{ text }` | 캐릭터가 말풍선으로 말함 (Claude 안 씀, 토큰 0) | |
 | `state.get` | | 지금 상태 | `{ claude, agent, pomodoro, usage, build }` |
 | `usage.get` | | 사용량 새로 가져오기 (가능하면) | `{ usage }` |
@@ -99,4 +104,5 @@ node scripts/bridge-send.js command '{"name":"screen.ask","args":{"question":"�
 - 🌐 번역 / ✍️ 다듬기: `clip.translate` / `clip.polish`.
 - ⏹ 멈추기: `agent.stop`.
 - 🔋 사용량: `usage` 상태를 받아 5시간 한도 %를 게이지로. 80% 넘으면 빨간색.
+- 😊 표정 버튼 (VTube Studio 처럼): 버튼마다 `expression.set` + 대사. 설정 화면에서 `expression.list` 로 고르게. `expression` 방송으로 켜진 버튼 표시. 모델에 표정이 없으면 `motion.play`.
 - 💭 정해진 말: `talk.send` (버튼마다 문구 설정, 예: "오늘 할 일 정리해 줘").

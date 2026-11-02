@@ -257,6 +257,8 @@ async function loadModel(model, { announce = true, auto = false } = {}) {
   if (!settings.gaze) mascot.resetFocus();
   applyHeight(settings.height);
   applyMotions();
+  manualExp = null;
+  ipcRenderer.send('expressions', mascot.listExpressions());   // 메뉴·스트림덱의 표정 버튼용
   if (announce) say(AGENT.TEXT.hello, 5800, { auto, tts: false, lip: true });   // DeepSeek짱 인사
   return true;
 }
@@ -833,6 +835,16 @@ function agentExpression(state) {
   return null;
 }
 
+// 직접 고른 표정 (메뉴·스트림덱). 같은 걸 다시 고르면 원래 얼굴로
+let manualExp = null;
+function setManualExpression(name, text) {
+  if (!name || name === manualExp) { manualExp = null; mascot.resetExpression(); }
+  else { manualExp = name; mascot.setExpression(name); }
+  playMotion();
+  if (text) say(String(text).slice(0, 200), 3500, { tts: false, lip: true });
+  ipcRenderer.send('expression-now', manualExp);
+}
+
 // Claude 모드(에이전트) / 끄면 혼잣말 피규어. talkVisible: 말 걸기 창이 떠 있음 (그동안 내 말풍선은 쉼)
 let claudeMode = true, talkVisible = false;
 ipcRenderer.invoke('claude-mode-get').then((on) => { claudeMode = on !== false; }).catch(() => {});
@@ -850,7 +862,9 @@ const agentUi = { running: false, ask: null, lastToolSay: 0, lastMutterAt: 0, la
 function agentFace(state, ms = 0) {
   clearTimeout(agentUi.expTimer);
   const name = state && agentExpression(state);
-  if (name) mascot.setExpression(name); else mascot.resetExpression();
+  if (name) mascot.setExpression(name);
+  else if (manualExp) mascot.setExpression(manualExp);   // 직접 고른 표정은 반응이 끝나면 되돌아감
+  else mascot.resetExpression();
   agentUi.flashUntil = ms ? Date.now() + ms : 0;
   if (ms) agentUi.expTimer = setTimeout(() => agentFace(agentUi.ask ? 'approval' : agentUi.running ? 'thinking' : null), ms);
 }
@@ -991,6 +1005,8 @@ ipcRenderer.on('settings-action', (event, a = {}) => {
     case 'test-voice': if (!playVoice()) say('보이스가 없어', undefined, { tts: false }); break;
     case 'voice-mode': setVoiceMode(a.value); break;
     case 'talk': talk(); break;
+    case 'expression': setManualExpression(a.value, a.text); break;
+    case 'motion': playMotion(); if (a.text) say(String(a.text).slice(0, 200), 3500, { tts: false, lip: true }); break;
     // 今の声の出し方で試す（ボイスパックだけ・ミュートはボイスパックのセリフで）
     case 'test-tts': {
       const mode = voiceModeOf(settings);

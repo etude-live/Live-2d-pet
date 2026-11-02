@@ -490,6 +490,9 @@ const onMascot = (channel, fn) => ipcMain.on(channel, (event, arg) => {
   if (m) fn(m, arg);
 });
 
+onMascot('expressions', (m, list) => { m.expressions = Array.isArray(list) ? list.map(String).slice(0, 100) : []; m.expression = null; });
+onMascot('expression-now', (m, name) => { m.expression = name || null; bridge?.broadcast({ type: 'expression', payload: { name: m.expression } }); });
+
 onMascot('model-bounds', (m, inset) => {
   m.inset = inset;
   clampToVSCode(m);
@@ -729,6 +732,12 @@ onMascot('show-context-menu', async (m) => {
     claudeMenu(),
     { type: 'separator' },
     { label: '👗 모델', submenu: modelItems },
+    {
+      label: m.expressions?.length ? `😊 표정 (${m.expressions.length}개)` : '😊 표정 (이 모델엔 없음)',
+      enabled: !!m.expressions?.length,
+      submenu: (m.expressions || []).map((name) => ({ label: name, type: 'checkbox', checked: m.expression === name, click: () => act('expression', { value: name }) })).concat(
+        m.expressions?.length ? [{ type: 'separator' }, { label: '원래 얼굴로', click: () => act('expression', { value: null }) }] : [])
+    },
     {
       label: '🔊 음성',
       submenu: VOICE_MODES.map(([value, label]) => ({
@@ -1290,6 +1299,16 @@ async function handleCommand(payload = {}, client) {
     switch (name) {
       case 'mode.set': setClaudeMode(args.on !== false); result = { ok: true, claude: claudeOn() }; break;
       case 'mode.toggle': setClaudeMode(!claudeOn()); result = { ok: true, claude: claudeOn() }; break;
+      case 'expression.list': { const pm = primaryMascot(); result = { ok: true, expressions: pm?.expressions || [], current: pm?.expression || null }; break; }
+      case 'expression.set': {
+        const pm = primaryMascot();
+        const name = args.name == null ? null : String(args.name);
+        if (name && !(pm?.expressions || []).includes(name)) { result = { ok: false, error: 'no-such-expression' }; break; }
+        pm?.win.webContents.send('settings-action', { type: 'expression', value: name, text: args.text });
+        result = { ok: true }; break;
+      }
+      case 'expression.reset': primaryMascot()?.win.webContents.send('settings-action', { type: 'expression', value: null }); result = { ok: true }; break;
+      case 'motion.play': primaryMascot()?.win.webContents.send('settings-action', { type: 'motion', text: args.text }); result = { ok: true }; break;
       case 'talk.open': showTalk(true); result = { ok: true }; break;
       case 'talk.toggle': toggleTalk(); result = { ok: true }; break;
       case 'talk.hide': hideTalk(); result = { ok: true }; break;
