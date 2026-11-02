@@ -6,7 +6,7 @@ const path = require('path');
 const crypto = require('crypto');
 
 const POLL_MS = 5000;        // 창 읽는 간격
-const MIN_GAP = 60000;       // 거드는 최소 간격
+const MIN_GAP = 20000;       // 거드는 최소 간격
 const Q_MAX = 900, A_HEAD = 1600, A_TAIL = 600;
 
 function helperPath(app) {
@@ -57,7 +57,17 @@ function extract(nodes = []) {
 
 const clip = (s, head, tail = 0) => (s.length <= head + tail ? s : s.slice(0, head) + '\n…(중략)…\n' + (tail ? s.slice(-tail) : ''));
 
-function createClaudeWatch({ app, generate, getPersona, getMemory, onSay, onState }) {
+function createClaudeWatch({ app, generate, getPersona, getMemory, onSay, onState, logFile }) {
+  // 판단 기록 (왜 말했는지/안 했는지). 같은 이유가 이어지면 한 번만 적음
+  let lastLog = '';
+  function log(msg) {
+    if (!logFile || msg === lastLog) return;
+    lastLog = msg;
+    try {
+      if (fs.existsSync(logFile) && fs.statSync(logFile).size > 300000) fs.renameSync(logFile, logFile + '.old');
+      fs.appendFileSync(logFile, `${new Date().toLocaleTimeString('ko-KR', { hour12: false })} ${msg}\n`);
+    } catch { /* 무시 */ }
+  }
   let on = false, timer = null, busy = false;
   let lastKey = '', stableKey = '', stableCount = 0, lastSaidKey = '', lastAt = 0, lastLine = '', firstSeen = true;
 
@@ -66,19 +76,23 @@ function createClaudeWatch({ app, generate, getPersona, getMemory, onSay, onStat
     busy = true;
     try {
       const r = await readWindow(app);
-      if (!r.ok) { onState?.({ error: r.error }); if (r.error === 'not-trusted' || r.error === 'no-helper') stop(); return; }
+      if (!r.ok) { log('읽기 실패: ' + r.error); onState?.({ error: r.error }); if (r.error === 'not-trusted' || r.error === 'no-helper') stop(); return; }
       const ex = extract(r.nodes);
-      const body = ex.method === 'class' ? `${ex.q}\n---\n${ex.a}` : ex.tail;
-      if (!body.trim() || (ex.method === 'class' && ex.a.length < 10)) return;
+      const body = ex.method === 'class' ? `${ex.q}\n---\n${ex.a}` : ex.tail.slice(-1500);
+      const info = `[${ex.method} 블록${ex.blocks} 질문${ex.q.length}자 답${ex.a.length}자 노드${r.nodes.length}]`;
+      if (!body.trim() || (ex.method === 'class' && ex.a.length < 10)) { log(`${info} 답이 아직 없음`); return; }
       const key = crypto.createHash('sha1').update(body).digest('hex');
       // 글이 안 바뀐 채로 두 번 = 답이 다 나옴
-      if (key !== stableKey) { stableKey = key; stableCount = 0; return; }
+      if (key !== stableKey) { stableKey = key; stableCount = 0; log(`${info} 글이 바뀌는 중`); return; }
       if (++stableCount < 2) return;   // 10초 넘게 그대로일 때만 (도구 실행 중 멈춰 있는 것과 구분)
-      if (ex.method === 'class' && (ex.a.length < 40 || BUSY.test(ex.a.slice(-80)))) return;   // 아직 일하는 중
-      if (firstSeen) { firstSeen = false; lastSaidKey = key; return; }   // 켤 때 이미 있던 대화엔 안 끼어듦
-      if (key === lastSaidKey || Date.now() - lastAt < MIN_GAP) return;
+      if (ex.method === 'class' && BUSY.test(ex.a.slice(-80))) { log(`${info} 아직 실행 중 (끝: ${ex.a.slice(-30).replace(/\n/g, ' ')})`); return; }
+      if (firstSeen) { firstSeen = false; lastSaidKey = key; log(`${info} 켤 때 있던 대화라 건너뜀`); return; }
+      if (key === lastSaidKey) return;
+      if (Date.now() - lastAt < MIN_GAP) { log(`${info} 방금 말해서 쉼`); return; }
       lastSaidKey = key; lastAt = Date.now();
+      log(`${info} 거들기 요청 (질문: ${ex.q.slice(0, 40).replace(/\n/g, ' ')})`);
       const line = await comment(ex);
+      log(line ? `→ 말함: ${line}` : '→ 할 말 없음 ("-")');
       if (line) { lastLine = line; onSay?.(line); }
     } catch (e) {
       console.warn('[study]', e.message);
@@ -97,7 +111,7 @@ function createClaudeWatch({ app, generate, getPersona, getMemory, onSay, onStat
       convo,
       lastLine ? `(네가 직전에 한 말: "${lastLine}" — 반복하지 마)` : '',
       '마지막 질문과 답을 보고, 옆에서 공부를 같이 하는 친구처럼 한마디 거들어라. 핵심 짚기, 헷갈릴 만한 점, 다음에 물어보면 좋을 것, 가벼운 훈수나 칭찬 중 하나.',
-      '규칙: 1~2문장, 70자 이내, 말투 지침대로. 마크다운·따옴표 없이 대사만. 어울리면 맨 앞에 [하트] [홍조] [얄미운] [식은땀] [눈물] 중 하나. 끼어들 거리가 없으면 "-" 하나만.'
+      '규칙: 1~2문장, 70자 이내, 말투 지침대로. 마크다운·따옴표 없이 대사만. 어울리면 맨 앞에 [하트] [홍조] [얄미운] [식은땀] [눈물] 중 하나. 되도록 한마디는 해라. 정말 아무 말도 어색할 때만 "-" 하나.'
     ].filter(Boolean).join('\n\n');
     const outText = String(await generate(prompt) || '').trim().split('\n')[0].replace(/^["“]|["”]$/g, '').trim();
     return outText && outText !== '-' ? outText.slice(0, 140) : '';
@@ -105,7 +119,7 @@ function createClaudeWatch({ app, generate, getPersona, getMemory, onSay, onStat
 
   function start() {
     if (on) return;
-    on = true; firstSeen = true; stableKey = ''; stableCount = 0;
+    on = true; firstSeen = true; stableKey = ''; stableCount = 0; log('— 같이 공부 시작 —');
     timer = setInterval(poll, POLL_MS);
     poll();
   }
@@ -127,7 +141,7 @@ function createClaudeWatch({ app, generate, getPersona, getMemory, onSay, onStat
     return { ...r, nodes: undefined, file, extract: ex && { method: ex.method, q: ex.q.length, a: ex.a.length, blocks: ex.blocks } };
   }
 
-  return { start, stop, test, get on() { return on; } };
+  return { start, stop, test, log, get on() { return on; } };
 }
 
 module.exports = { createClaudeWatch, extract };

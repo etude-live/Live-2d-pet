@@ -976,6 +976,7 @@ function startTalk() {
   });
   study = createClaudeWatch({
     app,
+    logFile: path.join(app.getPath('userData'), 'study.log'),
     generate: (p) => agent.summarize(p, '데스크톱 캐릭터의 짧은 대사를 쓰는 작가. 대사 한 줄만 출력한다.'),
     getPersona: () => agentConf.persona,
     getMemory: () => memory?.read() || '',
@@ -1032,7 +1033,8 @@ function studyItems() {
   if (process.platform !== 'darwin') return [];
   return [
     { label: '📖 같이 공부 (Claude 앱 보며 거들기)', type: 'checkbox', checked: !!agentConf?.study, click: (item) => setStudy(item.checked) },
-    { label: '🔍 Claude 창 읽기 테스트', click: () => studyTest() }
+    { label: '🔍 Claude 창 읽기 테스트', click: () => studyTest() },
+    { label: '📄 같이 공부 기록 보기', click: () => shell.openPath(path.join(app.getPath('userData'), 'study.log')) }
   ];
 }
 
