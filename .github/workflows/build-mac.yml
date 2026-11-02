@@ -1,0 +1,58 @@
+# 맥(Apple Silicon)용 앱을 빌드해서 내려받을 수 있게 올린다.
+# Actions 탭 → "Build macOS app" → 실행 결과 아래 Artifacts 에서 zip 을 받는다.
+#
+# - Live2D Cubism Core 는 저장소에 넣지 않고(라이선스), 빌드할 때 공식 CDN 에서 받는다.
+#   pixi-live2d-display 0.4.0 은 Core 6.x 와 맞지 않으므로 5.x 를 쓴다 (vendor/README.md).
+# - 모델(하루 등)은 넣지 않는다. 앱을 켠 뒤 ZIP/폴더를 캐릭터에 드롭해서 가져온다.
+# - 정식 서명이 없어 ad-hoc 서명만 한다. 처음 열 때 "확인되지 않은 개발자" 경고가 뜬다.
+name: Build macOS app
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/stoic-davinci-mocgrx, main]
+    paths: ['src/**', 'package.json', 'package-lock.json', 'assets/**', 'build/**', '.github/workflows/build-mac.yml']
+
+jobs:
+  mac-arm64:
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Download Live2D Cubism Core (5.x)
+        run: |
+          curl -fsSL -o vendor/live2dcubismcore.min.js https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js
+          head -c 300 vendor/live2dcubismcore.min.js | grep -o 'Version [0-9.]*' || true
+
+      - name: Build app (unpacked)
+        run: npx electron-builder --mac dir --arm64 --publish never
+
+      - name: Ad-hoc sign and check
+        run: |
+          APP="$(ls -d dist/mac-arm64/*.app | head -1)"
+          echo "APP=$APP" >> "$GITHUB_ENV"
+          codesign --force --deep --sign - "$APP"
+          codesign --verify --deep --strict "$APP"
+          # Claude 에이전트 실행 파일이 asar 밖에 풀려 있어야 실행할 수 있다
+          EXE="$APP/Contents/Resources/app.asar.unpacked/node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64/claude"
+          test -x "$EXE" && "$EXE" --version
+
+      - name: Zip
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          ditto -c -k --keepParent "$APP" "dist/live2d-desktop-mascot-ko-claude-$VERSION-mac-arm64.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: live2d-desktop-mascot-mac-arm64
+          path: dist/*.zip
+          retention-days: 14
