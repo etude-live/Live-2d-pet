@@ -376,6 +376,12 @@ class VRMAdapter {
     for (const n of ['happy', 'angry', 'sad', 'relaxed', 'surprised']) em.setValue(n, n === name ? 1 : 0);
   }
 
+  listExpressions() {
+    return this.vrm?.expressionManager ? ['happy', 'angry', 'sad', 'relaxed', 'surprised'] : [];
+  }
+
+  resetExpression() { this.setExpression(null); }
+
   setMouth(level) { this.mouth = level; }
 
   setModelSound() {} // VRM に付属音声は無い

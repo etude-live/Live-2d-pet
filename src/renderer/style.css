@@ -54,3 +54,12 @@ body, html {
   border-bottom: 0;
   border-top-color: rgba(255, 255, 255, 0.96);
 }
+
+/* 혼잣말(Claude 에이전트의 추론): 점선 말풍선 */
+#bubble.mutter {
+  background: rgba(248, 245, 255, 0.94);
+  color: #5a5470;
+  font-style: italic;
+  border: 1.5px dashed #b9b0d6;
+}
+#bubble.mutter::after { border-top-color: rgba(248, 245, 255, 0.94); }

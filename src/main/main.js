@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, screen, dialog, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, screen, dialog, shell, safeStorage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const tracker = require('./tracker');
@@ -8,6 +8,7 @@ const { isMotionFile } = require('../shared/motions');
 const { loadConfig } = require('./config');
 const { startBridge } = require('./bridge');
 const { createStore } = require('./characters');
+const { createAgent } = require('./agent');
 const { thumbnailUrl, customThumb, setCustomThumb } = require('./thumbs');
 const { FORMATS, importExtensions, importLabel } = require('../shared/formats');
 
@@ -65,6 +66,7 @@ if (!app.requestSingleInstanceLock()) {
     startCursorTracking();
     createTray();
     startBridgeFromConfig();
+    agentConf = loadAgentConf();
   });
 }
 
@@ -242,6 +244,7 @@ function createTray() {
     { label: '표시 / 숨기기', click: toggleVisible },
     { label: '위치 초기화', click: resetPosition },
     { type: 'separator' },
+    { label: '🤖 Claude에게 일 시키기', click: () => openAgentWindow() },
     { label: '💬 말 걸기', click: () => primaryMascot()?.win.webContents.send('menu-action', { type: 'talk' }) },
     { label: '⚙️ 설정 열기', click: () => openSettingsWindow() },
     { label: '📜 크레딧', click: openCredits },
@@ -701,6 +704,7 @@ onMascot('show-context-menu', async (m) => {
   }
 
   const template = [
+    { label: '🤖 Claude에게 일 시키기', click: () => openAgentWindow() },
     { label: '💬 말 걸기', click: () => act('talk') },
     { type: 'separator' },
     { label: '👗 모델', submenu: modelItems },
@@ -738,7 +742,114 @@ onMascot('show-context-menu', async (m) => {
   Menu.buildFromTemplate(template).popup(m.win);
 });
 
+// ===== Claude 에이전트 =====
+// 대화는 하나. 반응은 대표 캐릭터만 한다(VS Code 연동과 같음)
+let agentWindow = null;
+let agentConf = { cwd: '', model: '', apiKey: '' };
+const agentConfFile = () => path.join(app.getPath('userData'), 'agent.json');
+
+function loadAgentConf() {
+  try {
+    const j = JSON.parse(fs.readFileSync(agentConfFile(), 'utf8'));
+    let apiKey = '';
+    if (j.apiKeyEnc && safeStorage.isEncryptionAvailable()) {
+      try { apiKey = safeStorage.decryptString(Buffer.from(j.apiKeyEnc, 'base64')); } catch { /* 다른 기기에서 옮긴 파일 */ }
+    }
+    return { cwd: j.cwd || '', model: j.model || '', apiKey };
+  } catch {
+    return { cwd: '', model: '', apiKey: '' };
+  }
+}
+
+function saveAgentConf() {
+  const j = { cwd: agentConf.cwd, model: agentConf.model };
+  if (agentConf.apiKey && safeStorage.isEncryptionAvailable()) {
+    j.apiKeyEnc = safeStorage.encryptString(agentConf.apiKey).toString('base64');
+  }
+  try { fs.writeFileSync(agentConfFile(), JSON.stringify(j, null, 2), { mode: 0o600 }); } catch (e) { console.error('[agent] 설정 저장 실패:', e.message); }
+}
+
+const agent = createAgent({
+  getOptions: () => agentConf,
+  onEvent: (e) => {
+    if (agentWindow && !agentWindow.isDestroyed()) {
+      agentWindow.webContents.send('agent-event', e);
+      if (e.type === 'permission' && !agentWindow.isVisible()) agentWindow.showInactive();
+    }
+    primaryMascot()?.win.webContents.send('agent-event', e);
+  }
+});
+
+const agentState = () => ({ cwd: agentConf.cwd, model: agentConf.model, hasKey: !!agentConf.apiKey, busy: agent.busy });
+
+function openAgentWindow() {
+  if (agentWindow && !agentWindow.isDestroyed()) { agentWindow.show(); agentWindow.focus(); return; }
+  const W = 420, H = 560;
+  const wa = screen.getPrimaryDisplay().workArea;
+  let x = wa.x + wa.width - W - 20, y = wa.y + wa.height - H - 20;
+  const pm = primaryMascot();
+  if (pm) {   // 대표 캐릭터 왼쪽에 붙여서
+    const b = pm.win.getBounds();
+    x = Math.max(wa.x, b.x - W - 4);
+    y = Math.min(Math.max(wa.y, b.y + b.height - H), wa.y + wa.height - H);
+  }
+  agentWindow = new BrowserWindow({
+    x, y, width: W, height: H, minWidth: 320, minHeight: 360,
+    title: 'Claude에게 일 시키기',
+    alwaysOnTop: true,
+    webPreferences: { nodeIntegration: true, contextIsolation: false }
+  });
+  agentWindow.setMenuBarVisibility(false);
+  agentWindow.loadFile(path.join(__dirname, '../renderer/agent.html'));
+  // 닫아도 작업은 계속된다. 창만 숨김
+  agentWindow.on('close', (e) => { if (!app.isQuitting) { e.preventDefault(); agentWindow.hide(); } });
+}
+
+ipcMain.handle('agent-get-state', () => agentState());
+ipcMain.handle('agent-send', async (event, text) => {
+  const t = String(text || '').trim();
+  if (!t) return null;
+  if (agent.busy) return '이미 작업 중이에요';
+  if (!agentConf.cwd) {
+    primaryMascot()?.win.webContents.send('agent-event', { type: 'needFolder' });
+    return '작업 폴더를 먼저 골라 주세요';
+  }
+  agent.send(t).catch((e) => {
+    primaryMascot()?.win.webContents.send('agent-event', { type: 'error', message: e.message });
+    agentWindow?.webContents.send('agent-event', { type: 'error', message: e.message });
+  });
+  return null;
+});
+ipcMain.on('agent-answer', (event, { id, allow }) => agent.answer(id, allow));
+ipcMain.on('agent-stop', () => agent.stop());
+ipcMain.handle('agent-reset', () => { agent.reset(); return agentState(); });
+ipcMain.handle('agent-pick-folder', async () => {
+  if (agent.busy) return agentState();
+  const r = await dialog.showOpenDialog(agentWindow, {
+    title: 'Claude가 일할 폴더',
+    defaultPath: agentConf.cwd || app.getPath('home'),
+    properties: ['openDirectory', 'createDirectory']
+  });
+  if (!r.canceled && r.filePaths[0] && r.filePaths[0] !== agentConf.cwd) {
+    agentConf.cwd = r.filePaths[0];
+    agent.reset(); // 폴더가 바뀌면 새 대화
+    saveAgentConf();
+  }
+  return agentState();
+});
+ipcMain.handle('agent-set', (event, patch = {}) => {
+  if (typeof patch.model === 'string') agentConf.model = patch.model;
+  if (typeof patch.apiKey === 'string') agentConf.apiKey = patch.apiKey;
+  saveAgentConf();
+  return agentState();
+});
+// 캐릭터를 눌러 승인 말풍선에 답할 때
+onMascot('agent-answer', (m, { id, allow }) => agent.answer(id, allow));
+onMascot('agent-open', () => openAgentWindow());
+
 app.on('before-quit', () => {
+  app.isQuitting = true;
+  agent.stop();
   store?.flush();
   if (bridge) bridge.stop();
   if (trackerHandle) trackerHandle.stop();

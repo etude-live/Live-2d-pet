@@ -193,6 +193,16 @@ class Live2DAdapter {
     if (this.model) this.model.expression(name);
   }
 
+  // モデルが持つ表情の名前（model3.json の Expressions）
+  listExpressions() {
+    const ex = this.model?.internalModel?.settings?.expressions || [];
+    return ex.map((e) => e.Name || e.name).filter(Boolean);
+  }
+
+  resetExpression() {
+    this.model?.internalModel?.motionManager?.expressionManager?.resetExpression();
+  }
+
   // 口パク 0〜1（nullでモーションに任せる）
   setMouth(level) {
     this.mouth = level;

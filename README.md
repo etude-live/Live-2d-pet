@@ -1,3 +1,41 @@
+# Live2D Desktop Mascot — 한국어판 + Claude 에이전트
+
+[fixtan/live2d-desktop-mascot](https://github.com/fixtan/live2d-desktop-mascot)(MIT) v1.5.0 을 한국어로 옮기고,
+캐릭터에게 직접 일을 시킬 수 있는 **Claude 에이전트**를 붙인 버전입니다.
+
+## Claude 에이전트
+
+캐릭터를 우클릭(또는 트레이) → **🤖 Claude에게 일 시키기** 를 누르면 채팅 창이 열립니다.
+
+1. 📁 버튼으로 Claude가 일할 폴더를 고릅니다. (그 폴더 안에서만 파일을 읽고 고칩니다)
+2. 할 일을 적고 Enter. Claude Agent SDK(Claude Code와 같은 엔진)가 파일 읽기·수정·명령 실행을 합니다.
+3. 파일 쓰기·명령 실행 같은 일은 **매번 물어봅니다.** 채팅 창의 허용/거부로 답하고, 캐릭터를 누르면 창이 열립니다.
+4. 🆕 새 대화, ⚙️ 모델·API 키 설정. 창을 닫아도 작업은 계속됩니다.
+
+캐릭터는 작업 상태에 반응합니다. 반응 흐름과 혼잣말 규칙은 [deepseek-harness-kr](https://github.com/noire113-dev/deepseek-harness-kr)의 DeepSeek짱을 따랐습니다.
+
+| 상태 | 반응 |
+|---|---|
+| 시작 | "알겠어요! 시작할게요" |
+| 생각 중 | 추론 요약을 점선 말풍선 혼잣말로 (6초에 한 번 정도) |
+| 도구 사용 | "파일 읽는 중…", "명령 실행 중…" 등 |
+| 승인 대기 | "이 명령 실행해도 될까요?" + 당황/땀 표정 |
+| 완료 / 실패 | "다 했어요!" + 답변 첫 문장 / "앗, 문제가 생겼어요…" |
+
+- **표정은 모델에 맞춰 자동으로 고릅니다.** 모델의 표정 이름에서 heart·happy·smile(완료), sweat·surprised(승인 대기), tear·sad(실패), think(생각 중) 같은 낱말을 찾아 씁니다. 맞는 표정이 없으면 몸짓만 합니다. VRM 은 happy / surprised / sad / relaxed 를 씁니다.
+- 말풍선 글자의 모음(한글 ㅏㅔㅣㅗㅜ…, 영어 a e i o u)에 맞춰 입을 움직입니다.
+
+### 인증
+
+- **API 키**: ⚙️ 에서 Anthropic API 키를 넣으면 그걸 씁니다(사용한 만큼 과금). 키는 OS 암호화 저장소(macOS 키체인)로 암호화해 `agent.json` 에 저장합니다.
+- 비워 두면 이 컴퓨터의 Claude Code 설정(`ANTHROPIC_API_KEY` 환경 변수 등)을 따릅니다.
+
+설정 파일: `~/Library/Application Support/live2d-desktop-mascot/agent.json` (macOS)
+
+---
+
+## 원본 README (일본어)
+
 # Live2D Desktop Mascot
 
 VS Code のウィンドウ内に常駐する Live2D / VRM デスクトップマスコット（Windows / macOS / Linux）。

@@ -5,6 +5,7 @@ const { pathToFileURL, fileURLToPath } = require('url');
 const { FORMATS, formatOf, isModelFile, isSingleFileModel, modelFileLabel } = require('../shared/formats');
 const { isMotionFile, motionRoles } = require('../shared/motions');
 const { JOKES } = require('../shared/jokes');
+const AGENT = require('../shared/agent-lines');
 
 // ===== パス =====
 const ASSETS_DIR = fileURLToPath(new URL('../../assets/', location.href));
@@ -120,6 +121,8 @@ const NO_MODEL = {
   listMotions: () => [],
   playMotion() {},
   setExpression() {},
+  listExpressions: () => [],
+  resetExpression() {},
   setMouth() {},
   setModelSound() {},
   setMotions() {},
@@ -467,9 +470,10 @@ function positionBubble() {
 }
 
 // auto：自動の発言（ランダム・時報・VS Code・起動時のあいさつ）。他のキャラが話し中なら言わない
-function say(text, ms, { tts = true, auto = false } = {}) {
+function say(text, ms, { tts = true, auto = false, mutter = false, lip = false } = {}) {
   if (!claimSpeech(!auto)) return false;
   bubble.textContent = text;
+  bubble.classList.toggle('mutter', mutter);   // 혼잣말: 점선 말풍선
   bubble.classList.add('show');
   positionBubble();
   clearTimeout(bubbleTimer);
@@ -478,7 +482,30 @@ function say(text, ms, { tts = true, auto = false } = {}) {
     maybeEndSpeech();
   }, ms || Math.max(3000, text.length * 180));
   if (tts && settings.voice && !settings.mute) speak(text);
+  else if (lip) lipSyncText(text);   // 음성 파일을 틀 때는 그쪽이 입을 움직이므로 끔
   return true;
+}
+
+// 소리 없이 말풍선만 낼 때: 글자의 모음에 맞춰 입을 움직인다 (DeepSeek짱 방식)
+//   한글은 중성(ㅏㅐㅑ…)으로, 영어는 a e i o u 로 입 크기를 정한다
+const JUNG_OPEN = [1, .6, 1, .6, .8, .55, .8, .55, .7, .8, .7, .55, .7, .5, .7, .55, .5, .45, .3, .35, .35];
+let lipTimer = null;
+function mouthOf(ch) {
+  const c = ch.charCodeAt(0);
+  if (c >= 0xAC00 && c <= 0xD7A3) return JUNG_OPEN[Math.floor(((c - 0xAC00) % 588) / 28)];
+  const l = ch.toLowerCase();
+  if (l === 'a') return 0.9; if (l === 'o') return 0.7; if (l === 'e') return 0.55; if (l === 'u') return 0.45; if (l === 'i') return 0.35;
+  if (/[a-z0-9]/.test(l)) return 0.15;
+  return 0;
+}
+function lipSyncText(text) {
+  clearInterval(lipTimer);
+  const chars = [...String(text).slice(0, 80)];
+  let i = 0;
+  lipTimer = setInterval(() => {
+    if (i >= chars.length) { clearInterval(lipTimer); mascot.setMouth(null); return; }
+    mascot.setMouth(mouthOf(chars[i++]));
+  }, 85);
 }
 
 // 自作セリフの読み上げ。VOICEVOXが使えなければOS音声に切り替える
@@ -568,9 +595,9 @@ function tellJoke(auto = false) {
   do { i = Math.floor(Math.random() * JOKES.length); } while (JOKES.length > 1 && i === lastJoke);
   const [q, a] = JOKES[i];
   clearTimeout(jokeTimer);
-  if (!say(q, a ? JOKE_Q_MS + 500 : JOKE_A_MS, { tts: false, auto })) return false;
+  if (!say(q, a ? JOKE_Q_MS + 500 : JOKE_A_MS, { tts: false, auto, lip: true })) return false;
   lastJoke = i;
-  if (a) jokeTimer = setTimeout(() => say(a, JOKE_A_MS, { tts: false, auto: true }), JOKE_Q_MS);
+  if (a) jokeTimer = setTimeout(() => say(a, JOKE_A_MS, { tts: false, auto: true, lip: true }), JOKE_Q_MS);
   return true;
 }
 
@@ -689,6 +716,7 @@ window.addEventListener('click', (e) => {
   if (e.detail > 1) return;
   clearTimeout(clickTimer);
   clickTimer = setTimeout(() => {
+    if (agentOnClick()) return;
     const clickVoices = voicesFor('click');
     if (clickVoices.length && Math.random() < 0.5) playVoice(pick(clickVoices));
     else playMotion();
@@ -803,6 +831,115 @@ function onBridgeEvent({ type, payload = {}, client }) {
 }
 
 ipcRenderer.on('bridge-event', (event, msg) => onBridgeEvent(msg));
+
+// ===== Claude 에이전트 (메인의 src/main/agent.js → IPC) =====
+// 반응 흐름은 DeepSeek짱(deepseek-harness-kr)과 같다:
+//   시작 → 생각 중(추론을 혼잣말로) → 도구 사용 → 승인 대기(식은땀) → 완료(하트 눈) / 실패(눈물)
+// 표정은 모델이 가진 표정 이름에서 상태에 맞는 것을 찾아 쓴다. 없으면 몸짓만.
+const EXP_HINTS = {
+  thinking: [/think|hmm|question|confus|wonder|생각|고민|考|悩/i, /relax|calm|normal/i],
+  approval: [/sweat|panic|nervous|worr|땀|당황|焦|汗/i, /surpris|shock|놀람|驚/i],
+  done: [/heart|love|happy|joy|smile|glad|하트|기쁨|웃|笑|喜/i],
+  error: [/tear|cry|sad|sorrow|눈물|슬픔|泣|悲/i, /dizzy|angry|어지|怒/i]
+};
+const VRM_EXP = { thinking: 'relaxed', approval: 'surprised', done: 'happy', error: 'sad' };
+
+function agentExpression(state) {
+  const names = mascot.listExpressions();
+  if (!names.length) return null;
+  if (mascot.formatId === 'vrm') return VRM_EXP[state] || null;
+  for (const re of EXP_HINTS[state] || []) {
+    const hit = names.find((n) => re.test(n));
+    if (hit) return hit;
+  }
+  return null;
+}
+
+const agentUi = { running: false, ask: null, lastToolSay: 0, lastMutterAt: 0, lastSayAt: 0, expTimer: null, flashUntil: 0 };
+
+function agentFace(state, ms = 0) {
+  clearTimeout(agentUi.expTimer);
+  const name = state && agentExpression(state);
+  if (name) mascot.setExpression(name); else mascot.resetExpression();
+  agentUi.flashUntil = ms ? Date.now() + ms : 0;
+  if (ms) agentUi.expTimer = setTimeout(() => agentFace(agentUi.ask ? 'approval' : agentUi.running ? 'thinking' : null), ms);
+}
+
+function agentSay(text, ms, opts = {}) {
+  if (!text) return;
+  if (say(text, ms, { tts: false, lip: true, ...opts })) agentUi.lastSayAt = Date.now();
+}
+
+function agentOnClick() {
+  if (agentUi.ask) { ipcRenderer.send('agent-open'); return true; }   // 승인 대기 중: 창을 띄워서 보여 줌
+  if (agentUi.running && Math.random() < 0.5) { agentSay(pick(AGENT.TEXT.working)); return true; }
+  return false;
+}
+
+function onAgentEvent(e) {
+  const now = Date.now();
+  switch (e.type) {
+    case 'start':
+      agentUi.running = true; agentUi.ask = null;
+      agentFace('thinking');
+      playMotion();
+      agentSay(AGENT.TEXT.start, 2500);
+      break;
+    case 'thought':
+    case 'text': {
+      // 추론 요약과 도구 사이의 짧은 진행 문장을 가끔 혼잣말로 (6초에 한 번, 방금 말했으면 쉼)
+      if (!agentUi.running || agentUi.ask) break;
+      if (now - agentUi.lastMutterAt < 6000 || now - agentUi.lastSayAt < 2500) break;
+      const paras = e.type === 'thought' ? AGENT.thoughtParagraphs(e.text) : [AGENT.answerLine(e.text, 60)];
+      const line = paras.map((p) => (e.type === 'thought' ? AGENT.thoughtLine(p) : p)).filter(Boolean).pop();
+      if (!line) break;
+      agentUi.lastMutterAt = now;
+      agentSay(line, Math.min(5200, Math.max(3800, 1500 + line.length * 55)), { mutter: true });
+      if (Math.random() < 0.35) playMotion();
+      break;
+    }
+    case 'tool':
+      if (agentUi.ask || now - agentUi.lastToolSay < 1500) break;
+      agentUi.lastToolSay = now;
+      agentSay(AGENT.toolLine(e.name), 2500);
+      break;
+    case 'permission': {
+      agentUi.ask = e;
+      agentFace('approval');
+      playMotion();
+      const what = String(e.summary || '').slice(0, 60);
+      agentSay(`${AGENT.askLine(e.tool)}\n${what}${what.length >= 60 ? '…' : ''}\n(저를 누르면 창이 열려요)`, 55000);
+      break;
+    }
+    case 'permissionDone':
+      if (agentUi.ask?.id !== e.id) break;
+      agentUi.ask = null;
+      agentFace('thinking');
+      agentSay(e.allow ? '고마워요! 계속할게요' : '알겠어요, 다른 방법을 찾아볼게요', 2200);
+      break;
+    case 'done': {
+      agentFace('done', 4000);
+      playMotion();
+      const summary = AGENT.answerLine(e.result, 60);
+      agentSay(summary ? `${AGENT.TEXT.done}\n${summary}` : AGENT.TEXT.done, 5000);
+      break;
+    }
+    case 'error':
+      if (e.stopped) { agentFace(null); agentSay(AGENT.TEXT.stopped, 2500); break; }
+      agentFace('error', 5000);
+      playMotion();
+      agentSay(AGENT.TEXT.error, 5000);
+      break;
+    case 'needFolder':
+      agentSay(AGENT.TEXT.noFolder, 4000);
+      break;
+    case 'idle':
+      agentUi.running = false; agentUi.ask = null;
+      if (Date.now() >= agentUi.flashUntil) agentFace(null);   // 완료·실패 표정은 잠깐 유지
+      break;
+  }
+}
+ipcRenderer.on('agent-event', (event, e) => onAgentEvent(e));
 ipcRenderer.on('role', (event, { primary }) => { isPrimary = primary; });
 
 // ===== メインプロセスからのイベント =====

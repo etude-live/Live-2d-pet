@@ -10,6 +10,7 @@
     "postinstall": "node scripts/copy-three-addons.js"
   },
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.316",
     "@pixiv/three-vrm": "^3.5.5",
     "@pixiv/three-vrm-animation": "^3.5.5",
     "adm-zip": "^0.6.1",
@@ -33,7 +34,7 @@
   },
   "homepage": "https://github.com/fixtan/live2d-desktop-mascot",
   "productName": "Live2D Desktop Mascot",
-  "description": "VS Code の枠内に常駐する Live2D / VRM デスクトップマスコット",
+  "description": "Claude에게 일을 시킬 수 있는 Live2D / VRM 데스크톱 마스코트 (한국어판)",
   "author": "lain",
   "license": "MIT",
   "build": {
@@ -97,6 +98,9 @@
       "category": "Utility",
       "maintainer": "lain",
       "artifactName": "live2d-desktop-mascot-${version}-linux-${arch}.${ext}"
-    }
+    },
+    "asarUnpack": [
+      "node_modules/@anthropic-ai/claude-agent-sdk-*/**"
+    ]
   }
 }
