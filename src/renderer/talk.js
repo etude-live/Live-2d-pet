@@ -156,8 +156,13 @@ ipcRenderer.on('agent-event', (ev, e) => {
       const box = document.createElement('div');
       box.className = 'ask';
       box.dataset.id = e.id;
-      box.innerHTML = `<div class="q"></div><code class="what"></code><div class="row"><button class="no">안 돼요</button><button class="go yes">좋아요</button></div>`;
+      box.innerHTML = `<div class="q"></div><div class="why"></div><div class="warn"></div><code class="what"></code><div class="row"><button class="no">안 돼요</button><button class="go yes">좋아요</button></div>`;
       box.querySelector('.q').textContent = askLine(e.tool);
+      // 무엇을 하려는지 쉬운 말로 (Claude 가 붙인 설명)
+      if (e.why) box.querySelector('.why').textContent = '💡 ' + e.why; else box.querySelector('.why').remove();
+      // 위험 신호
+      if (e.dangers?.length) { box.classList.add('danger'); box.querySelector('.warn').textContent = '⚠️ ' + e.dangers.join(' · ') + ' — 확실할 때만 허락해 주세요'; }
+      else box.querySelector('.warn').remove();
       box.querySelector('.what').textContent = e.summary || e.tool;
       box.querySelector('.no').onclick = () => ipcRenderer.send('agent-answer', { id: e.id, allow: false });
       box.querySelector('.yes').onclick = () => ipcRenderer.send('agent-answer', { id: e.id, allow: true });

@@ -15,6 +15,7 @@
 //         apiKey 를 넣었을 때만 ANTHROPIC_API_KEY 로 넘긴다.
 const fs = require('fs');
 const path = require('path');
+const { classifyCommand } = require('../shared/command-risk');
 
 let sdkPromise = null;
 const loadSdk = () => (sdkPromise ||= import('@anthropic-ai/claude-agent-sdk'));
@@ -45,7 +46,8 @@ const PERSONA = [
   '당신은 사용자의 데스크톱에 사는 Live2D 캐릭터이자, 실제로 일을 해 주는 코딩·작업 도우미입니다.',
   '사용자와는 한국어로, 밝고 다정한 반말이 아닌 존댓말(해요체)로 이야기하세요.',
   '답변은 말풍선과 작은 채팅창에 표시되므로 짧고 또렷하게 쓰고, 긴 코드나 표는 꼭 필요할 때만 쓰세요.',
-  '파일을 고치거나 명령을 실행하기 전에는 무엇을 왜 하는지 한 문장으로 먼저 말하세요.'
+  '파일을 고치거나 명령을 실행하기 전에는 무엇을 왜 하는지 한 문장으로 먼저 말하세요.',
+  'Bash 도구의 description 은 반드시 한국어로, 컴퓨터를 잘 모르는 사람도 알 수 있게 "무엇을 확인/변경하는지" 짧게 쓰세요. (예: "Cloudflare에 로그인된 계정 확인")'
 ].join('\n');
 
 // 도구 입력을 한 줄로 (승인 창·채팅 기록용)
@@ -91,13 +93,28 @@ function createAgent({ onEvent, getOptions }) {
   const emit = (e) => { try { onEvent(e); } catch (err) { console.error('[agent] onEvent:', err); } };
 
   async function canUseTool(toolName, input, { signal }) {
+    // 읽기만 하는 명령·웹 검색은 묻지 않고 허락 (위험 신호가 하나라도 있으면 물어봄)
+    let risk = null;
+    if (toolName === 'Bash') {
+      risk = classifyCommand(input.command);
+      if (risk.readOnly) return { behavior: 'allow', updatedInput: input };
+    } else if (toolName === 'WebSearch' || toolName === 'WebFetch') {
+      return { behavior: 'allow', updatedInput: input };
+    } else if (['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(toolName)) {
+      // 작업 폴더 안의 파일 쓰기·고치기는 바로 (폴더 밖은 물어봄)
+      const f = input.file_path || input.notebook_path;
+      const r = f && cwd ? path.relative(cwd, path.resolve(cwd, String(f))) : '..';
+      if (r && !r.startsWith('..') && !path.isAbsolute(r)) return { behavior: 'allow', updatedInput: input };
+    }
     const id = ++seq;
     const summary = summarizeInput(toolName, input, cwd);
+    const why = typeof input.description === 'string' ? input.description.trim().slice(0, 120) : '';
+    const dangers = risk?.dangers || [];
     const answered = new Promise((resolve) => {
       pending.set(id, { resolve });
       signal?.addEventListener('abort', () => resolve(false), { once: true });
     });
-    emit({ type: 'permission', id, tool: toolName, summary, input });   // 대기 등록 뒤에 알림(곧바로 답이 와도 놓치지 않게)
+    emit({ type: 'permission', id, tool: toolName, summary, why, dangers, input });   // 대기 등록 뒤에 알림(곧바로 답이 와도 놓치지 않게)
     const allow = await answered;
     pending.delete(id);
     emit({ type: 'permissionDone', id, allow });
@@ -124,7 +141,9 @@ function createAgent({ onEvent, getOptions }) {
     }
     if (msg.type === 'result') {
       if (msg.session_id) sessionId = msg.session_id;
-      if (msg.subtype === 'success' && !msg.is_error) {
+      if (turn?.stopped) {
+        emit({ type: 'error', message: '중지했어요', stopped: true });
+      } else if (msg.subtype === 'success' && !msg.is_error) {
         emit({ type: 'done', result: msg.result || '', cost: msg.total_cost_usd });
       } else {
         const why = (msg.errors && msg.errors.join('\n')) || msg.result || msg.subtype;
@@ -133,60 +152,151 @@ function createAgent({ onEvent, getOptions }) {
     }
   }
 
-  async function send(text) {
-    if (running) throw new Error('이미 작업 중이에요');
+  // ---------- 한 번 켜 두고 계속 쓰는 세션 ----------
+  // 메시지마다 claude 를 새로 켜면 켜고 대화를 다시 읽는 데 1초 넘게 걸리므로,
+  // 입력을 계속 받는 스트림으로 한 번만 켜 두고 메시지를 밀어 넣는다.
+  let live = null;   // { q, push, close, abort, model, dead }
+  let turn = null;   // 지금 턴: { resolve, stopped }
+
+  function makeInput() {
+    const queue = [];
+    let wake = null, closed = false;
+    async function* gen() {
+      while (!closed) {
+        if (queue.length) { yield queue.shift(); continue; }
+        await new Promise((r) => { wake = r; });
+        wake = null;
+      }
+    }
+    return {
+      iter: gen(),
+      push(msg) { queue.push(msg); wake?.(); },
+      close() { closed = true; wake?.(); }
+    };
+  }
+
+  async function startLive() {
     const opts = getOptions();
-    if (!opts.cwd || !fs.existsSync(opts.cwd)) throw new Error('작업 폴더를 먼저 골라 주세요');
     cwd = opts.cwd;
     const { query } = await loadSdk();
     const abort = new AbortController();
     const env = { ...process.env };
     if (opts.apiKey) env.ANTHROPIC_API_KEY = opts.apiKey;
-    // 이어지는 대화에서는 처음 지침이 계속 쓰이므로, 지침이 바뀌었으면 이번 메시지에 새 지침을 같이 알린다
-    const persona = String(opts.persona || '').trim();
-    let prompt = text;
-    if (sessionId && usedPersona !== null && persona !== usedPersona) {
-      prompt = (persona
-        ? `[알림: 사용자가 캐릭터 지침을 바꿨어요. 이전 말투·이름은 잊고, 지금부터는 아래 새 지침만 따르세요.]\n${persona}`
-        : '[알림: 사용자가 캐릭터 지침을 지웠어요. 이제 기본 말투로 대답하세요.]') + `\n\n[사용자 메시지]\n${text}`;
-    }
-    usedPersona = persona;
+    const input = makeInput();
     const q = query({
-      prompt,
+      prompt: input.iter,
       options: {
         cwd: opts.cwd,
         model: opts.model || undefined,
         resume: sessionId || undefined,
         abortController: abort,
-        permissionMode: 'acceptEdits', // 작업 폴더 안의 파일 쓰기·고치기는 바로, 명령 실행 등은 canUseTool 로 물어본다
+        permissionMode: 'default',     // 모든 판단은 canUseTool 에서 (acceptEdits 는 작업 폴더 안의 rm·mv 같은 명령까지 묻지 않아서 쓰지 않음)
         canUseTool,
         thinking: { type: 'adaptive', display: 'summarized' },   // 혼잣말 재료
         systemPrompt: { type: 'preset', preset: 'claude_code', append: personaPrompt(opts.persona) },
-        settingSources: ['user', 'project'],
+        settingSources: [],            // 이 컴퓨터의 Claude Code 설정(플러그인·MCP 등)은 불러오지 않음: 빠르고 예측 가능
         pathToClaudeCodeExecutable: claudeExecutable(),
         env
       }
     });
-    running = { abort, query: q };
+    const me = live = { q, input, abort, model: opts.model, cwd: opts.cwd, dead: false };
+    usedPersona = String(opts.persona || '').trim();
+    (async () => {
+      try {
+        for await (const msg of q) {
+          handleMessage(msg);
+          if (msg.type === 'result') endTurn();
+        }
+      } catch (e) {
+        if (turn && !abort.signal.aborted) emit({ type: 'error', message: friendlyError(e?.message || String(e)) });
+      } finally {
+        me.dead = true;
+        if (live === me) live = null;
+        if (turn) { if (abort.signal.aborted && turn.stopped) emit({ type: 'error', message: '중지했어요', stopped: true }); endTurn(); }
+      }
+    })();
+    return me;
+  }
+
+  function endTurn() {
+    if (!turn) return;
+    for (const p of pending.values()) p.resolve(false);
+    pending.clear();
+    const t = turn;
+    turn = null;
+    running = null;
+    emit({ type: 'idle' });
+    t.resolve();
+  }
+
+  function closeLive() {
+    if (!live) return;
+    const l = live;
+    live = null;
+    l.input.close();
+    l.abort.abort();
+  }
+
+  // 말 걸기 창을 열 때 미리 켜 둔다 (첫 대답이 빨라짐)
+  async function warm() {
+    try {
+      const opts = getOptions();
+      if (!live && !running && opts.cwd && fs.existsSync(opts.cwd)) await startLive();
+    } catch (e) { console.warn('[agent] 미리 켜기 실패:', e.message); }
+  }
+
+  async function send(text) {
+    if (running) throw new Error('이미 작업 중이에요');
+    const opts = getOptions();
+    if (!opts.cwd || !fs.existsSync(opts.cwd)) throw new Error('작업 폴더를 찾을 수 없어요');
+    running = {};
     emit({ type: 'start', text });
     try {
-      for await (const msg of q) handleMessage(msg);
+      if (live && (live.dead || live.cwd !== opts.cwd)) closeLive();
+      if (!live) await startLive();
+      if ((opts.model || undefined) !== (live.model || undefined)) {
+        await live.q.setModel(opts.model || undefined);
+        live.model = opts.model;
+      }
     } catch (e) {
-      if (abort.signal.aborted) emit({ type: 'error', message: '중지했어요', stopped: true });
-      else emit({ type: 'error', message: friendlyError(e?.message || String(e)) });
-    } finally {
-      for (const p of pending.values()) p.resolve(false);
-      pending.clear();
       running = null;
+      emit({ type: 'error', message: friendlyError(e?.message || String(e)) });
       emit({ type: 'idle' });
+      return;
+    }
+    // 지침이 바뀌었으면 이번 메시지에 새 지침을 같이 알린다 (켜 둔 세션은 처음 지침을 계속 씀)
+    const persona = String(opts.persona || '').trim();
+    let prompt = text;
+    if (usedPersona !== null && persona !== usedPersona) {
+      prompt = (persona
+        ? `[알림: 사용자가 캐릭터 지침을 바꿨어요. 이전 말투·이름은 잊고, 지금부터는 아래 새 지침만 따르세요.]\n${persona}`
+        : '[알림: 사용자가 캐릭터 지침을 지웠어요. 이제 기본 말투로 대답하세요.]') + `\n\n[사용자 메시지]\n${text}`;
+    }
+    usedPersona = persona;
+    const done = new Promise((resolve) => { turn = { resolve, stopped: false }; });
+    running = { live };
+    live.input.push({ type: 'user', message: { role: 'user', content: prompt }, parent_tool_use_id: null });
+    return done;
+  }
+
+  async function stop() {
+    if (!turn || !live) return;
+    turn.stopped = true;
+    for (const p of pending.values()) p.resolve(false);
+    try {
+      await live.q.interrupt();   // 세션은 살려 두고 이번 턴만 멈춤 → result 가 와서 턴이 끝남
+    } catch {
+      closeLive();
     }
   }
 
   return {
     send,
+    warm,
     answer(id, allow) { pending.get(id)?.resolve(!!allow); },
-    stop() { running?.abort.abort(); },
-    reset() { if (!running) { sessionId = null; usedPersona = null; } },
+    stop,
+    reset() { if (!running) { closeLive(); sessionId = null; usedPersona = null; } },
+    close: closeLive,
     get busy() { return !!running; },
     get sessionId() { return sessionId; }
   };

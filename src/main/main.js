@@ -864,6 +864,7 @@ function showReply(focus = false) {
 }
 
 function showTalk(focus = true) {
+  agent.warm();   // Claude 를 미리 켜 둠 (첫 대답이 빨라짐)
   if (!alive(talk.input)) talk.input = makeTalkWindow('input', IN_W, IN_H);
   if (!alive(talk.reply)) talk.reply = makeTalkWindow('reply', RE_W, RE_H);
   liftMascot();
@@ -980,7 +981,7 @@ onMascot('agent-answer', (m, { id, allow }) => agent.answer(id, allow));
 app.on('before-quit', () => {
   app.isQuitting = true;
   dropMascot();
-  agent.stop();
+  agent.close();
   globalShortcut.unregisterAll();
   store?.flush();
   if (bridge) bridge.stop();
