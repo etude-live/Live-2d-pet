@@ -25,6 +25,8 @@ function readWindow(app, { prompt = false } = {}) {
   });
 }
 
+// 답 끝에 이런 말이 있으면 Claude 가 아직 일하는 중 (도구 실행·생각)
+const BUSY = /(실행 중|생각 중|작업 중|검색 중|읽는 중|Running|Thinking|Searching|Working|Reading)[.…\s]*$/i;
 const IS_USER = /user-message|font-user|human-turn|user-turn/i;
 const IS_AI = /claude-response|font-claude|claude-message|assistant-message|ai-turn/i;
 
@@ -71,7 +73,8 @@ function createClaudeWatch({ app, generate, getPersona, getMemory, onSay, onStat
       const key = crypto.createHash('sha1').update(body).digest('hex');
       // 글이 안 바뀐 채로 두 번 = 답이 다 나옴
       if (key !== stableKey) { stableKey = key; stableCount = 0; return; }
-      if (++stableCount < 1) return;
+      if (++stableCount < 2) return;   // 10초 넘게 그대로일 때만 (도구 실행 중 멈춰 있는 것과 구분)
+      if (ex.method === 'class' && (ex.a.length < 40 || BUSY.test(ex.a.slice(-80)))) return;   // 아직 일하는 중
       if (firstSeen) { firstSeen = false; lastSaidKey = key; return; }   // 켤 때 이미 있던 대화엔 안 끼어듦
       if (key === lastSaidKey || Date.now() - lastAt < MIN_GAP) return;
       lastSaidKey = key; lastAt = Date.now();
