@@ -1023,8 +1023,9 @@ async function studyTest() {
     return r;
   }
   const ex = r.extract;
-  mascotSay(ex.method === 'class' ? `읽었어요! 질문 ${ex.q}자, 답 ${ex.a}자` : '글은 읽었는데 질문/답 구분은 아직 못 해요. 파일을 보여 주세요!');
-  shell.showItemInFolder(r.file);
+  const who = `[${r.app}${r.title ? ' · ' + r.title.slice(0, 30) : ''}]`;
+  if (ex.method === 'class') mascotSay(`${who} 읽었어요! 질문 ${ex.q}자, 답 ${ex.a}자`);
+  else { mascotSay(`${who} 글은 읽었는데 질문/답 구분은 아직 못 해요. 열린 파일 내용을 보여 주세요!`); shell.openPath(r.file); }   // 텍스트 편집기로 바로 열기
   return r;
 }
 function studyItems() {
