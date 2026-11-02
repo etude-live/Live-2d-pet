@@ -29,7 +29,7 @@ function md(src) {
     return part.split(/\n{2,}/).map((para) => {
       const lines = para.split('\n').filter((l) => l.trim());
       if (!lines.length) return '';
-      const inline = (t) => esc(t)
+      const inline = (t) => esc(t.replace(/\\([\\`*_{}\[\]()#+\-.!~|>])/g, '$1'))   // 마크다운 이스케이프(\~ 등)는 글자만
         .replace(/`([^`]+)`/g, '<code>$1</code>')
         .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
         .replace(/^#{1,6}\s+(.*)$/, '<b>$1</b>');

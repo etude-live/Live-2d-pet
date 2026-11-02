@@ -13,6 +13,9 @@ on:
     branches: [claude/stoic-davinci-mocgrx, main]
     paths: ['src/**', 'package.json', 'package-lock.json', 'assets/**', 'build/**', '.github/workflows/build-mac.yml']
 
+permissions:
+  contents: write   # 릴리스 만들기 (앱 안 자동 업데이트가 여기서 받아 감)
+
 jobs:
   mac-arm64:
     runs-on: macos-14
@@ -27,6 +30,9 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Stamp build number
+        run: node -e "const f='package.json',p=require('./'+f);p.buildNumber=${{ github.run_number }};require('fs').writeFileSync(f,JSON.stringify(p,null,2)+'\n')"
 
       - name: Download Live2D Cubism Core (5.x)
         run: |
@@ -50,6 +56,15 @@ jobs:
         run: |
           VERSION=$(node -p "require('./package.json').version")
           ditto -c -k --keepParent "$APP" "dist/live2d-desktop-mascot-ko-claude-$VERSION-mac-arm64.zip"
+
+      - name: Publish release (for in-app update)
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          N=${{ github.run_number }}
+          git log -1 --format='%s%n%n%b' | grep -v -E '^(Co-Authored-By|Claude-Session):' > notes.txt
+          gh release create "build-$N" dist/*.zip --title "빌드 $N" --notes-file notes.txt --target "$GITHUB_SHA" --latest
 
       - uses: actions/upload-artifact@v4
         with:

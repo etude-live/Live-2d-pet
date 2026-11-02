@@ -9,6 +9,7 @@ const { loadConfig } = require('./config');
 const { startBridge } = require('./bridge');
 const { createStore } = require('./characters');
 const { createAgent, login } = require('./agent');
+const { checkForUpdate, startAutoUpdate, currentBuild } = require('./updater');
 const { thumbnailUrl, customThumb, setCustomThumb } = require('./thumbs');
 const { FORMATS, importExtensions, importLabel } = require('../shared/formats');
 
@@ -67,6 +68,7 @@ if (!app.requestSingleInstanceLock()) {
     createTray();
     startBridgeFromConfig();
     startTalk();
+    startAutoUpdate({ beforeQuit: () => dropMascot() });
   });
 }
 
@@ -250,6 +252,7 @@ function createTray() {
     { label: '⚙️ 설정 열기', click: () => openSettingsWindow() },
     { label: '📜 크레딧', click: openCredits },
     { label: '📂 설정 폴더 열기', click: () => shell.openPath(app.getPath('userData')) },
+    { label: `⬆️ 업데이트 확인 (빌드 ${currentBuild()})`, click: () => checkForUpdate({ manual: true, beforeQuit: () => dropMascot() }) },
     { type: 'separator' },
     { label: '❌ 종료', click: () => app.quit() }
   ]));
@@ -738,6 +741,7 @@ onMascot('show-context-menu', async (m) => {
     { type: 'separator' },
     { label: '⚙️ 설정 열기', click: () => openSettingsWindow(m.id) },
     { label: '📜 크레딧', click: openCredits },
+    { label: `⬆️ 업데이트 확인 (빌드 ${currentBuild()})`, click: () => checkForUpdate({ manual: true, beforeQuit: () => dropMascot() }) },
     { label: '🙈 숨기기(트레이에서 복원 가능)', click: () => m.win.hide() },
     { label: '❌ 종료', click: () => app.quit() }
   ];
