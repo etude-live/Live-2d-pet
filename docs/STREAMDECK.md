@@ -55,6 +55,7 @@
 | `usage` | `{ five_hour?: { utilization(0~1), resetsAt(ms), status }, seven_day?: {…}, … }` | Claude Pro/Max 사용량이 갱신될 때 (대화할 때마다) |
 | `mode` | `{ claude }` | Claude 모드를 켜거나 껐을 때 |
 | `expression` | `{ name }` | 표정이 바뀌었을 때 (`null` = 원래 얼굴). 버튼 켜짐 표시용 |
+| `study` | `{ on }` | 같이 공부 모드를 켜거나 껐을 때 |
 | `pong` | | `{ "v":1, "type":"ping" }` 에 대한 답 |
 
 `phase`: `idle` / `work`(집중) / `break`(짧은 휴식) / `long`(긴 휴식).
@@ -63,6 +64,8 @@
 
 | name | args | 하는 일 | 결과 |
 |---|---|---|---|
+| `study.toggle` | | 같이 공부 모드 켜기/끄기 (Mac, Claude 앱 창을 읽고 거듦) | `study` |
+| `study.test` | | Claude 창 읽기 테스트 (결과는 claude-read.txt) | `extract` |
 | `mode.toggle` | | Claude 모드 켜기/끄기 (끄면 혼잣말 피규어) | `claude` (true/false) |
 | `mode.set` | `{ on }` | Claude 모드 켜기/끄기 | `claude` |
 | `talk.open` | | 말 걸기 입력칸 열기 | |

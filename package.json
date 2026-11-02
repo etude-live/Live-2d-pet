@@ -102,6 +102,15 @@
     },
     "asarUnpack": [
       "node_modules/@anthropic-ai/claude-agent-sdk-*/**"
+    ],
+    "extraResources": [
+      {
+        "from": "build/bin",
+        "to": "bin",
+        "filter": [
+          "**/*"
+        ]
+      }
     ]
   }
 }

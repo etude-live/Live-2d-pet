@@ -949,6 +949,15 @@ function onAgentEvent(e) {
       playMotion();
       agentSay('⏰ ' + e.text, 15000);
       break;
+    case 'study': {   // 같이 공부: Claude 앱의 답을 보고 한마디
+      if (talkVisible) break;
+      const line = AGENT.parseLine(e.text);
+      const face = line.faces.find((f) => agentExpression(f));
+      if (face) agentFace(face, 5000);
+      playMotion();
+      say(line.text, Math.min(9000, Math.max(4500, 1500 + line.text.length * 110)), { tts: false, lip: true });
+      break;
+    }
     case 'loginDone':
       if (e.ok) { agentFace('done', 3000); agentSay('로그인됐어요! 이제 말 걸어 주세요', 4000); }
       break;

@@ -12,6 +12,7 @@ const { createAgent, login } = require('./agent');
 const { checkForUpdate, startAutoUpdate, currentBuild, justUpdated } = require('./updater');
 const { createMemory } = require('./memory');
 const { createMutter } = require('./mutter');
+const { createClaudeWatch } = require('./claude-watch');
 const { createReminders } = require('./reminders');
 const { createPomodoro } = require('./pomodoro');
 const { z } = require('zod');
@@ -791,7 +792,7 @@ const defaultWorkDir = () => path.join(app.getPath('home'), 'Claude작업');
 function loadAgentConf() {
   let j = {};
   try { j = JSON.parse(fs.readFileSync(agentConfFile(), 'utf8')); } catch { /* 처음 */ }
-  const conf = { cwd: j.cwd && fs.existsSync(j.cwd) ? j.cwd : defaultWorkDir(), model: j.model || DEFAULT_MODEL, persona: typeof j.persona === 'string' ? j.persona : '', enabled: j.enabled !== false };
+  const conf = { cwd: j.cwd && fs.existsSync(j.cwd) ? j.cwd : defaultWorkDir(), model: j.model || DEFAULT_MODEL, persona: typeof j.persona === 'string' ? j.persona : '', enabled: j.enabled !== false, study: j.study === true };
   try { fs.mkdirSync(conf.cwd, { recursive: true }); } catch (e) { console.error('[agent] 작업 폴더를 만들 수 없음:', e.message); }
   return conf;
 }
@@ -804,7 +805,7 @@ const alive = (w) => w && !w.isDestroyed();
 const sendTalk = (ch, msg) => { for (const w of [talk.reply, talk.input]) if (alive(w)) w.webContents.send(ch, msg); };
 
 // 기억·알림은 앱이 준비된 뒤 만든다 (userData 경로가 필요)
-let memory = null, reminders = null, mutter = null;
+let memory = null, reminders = null, mutter = null, study = null;
 
 // 캐릭터 전용 도구: Claude 가 직접 부른다 (mcp__mascot__*)
 const textResult = (t) => ({ content: [{ type: 'text', text: t }] });
@@ -973,6 +974,18 @@ function startTalk() {
     getMemory: () => memory?.read() || '',
     generate: (p) => agent.summarize(p, '데스크톱 캐릭터의 혼잣말 대사를 만드는 작가. 요청한 대사 줄만 출력한다.')
   });
+  study = createClaudeWatch({
+    app,
+    generate: (p) => agent.summarize(p, '데스크톱 캐릭터의 짧은 대사를 쓰는 작가. 대사 한 줄만 출력한다.'),
+    getPersona: () => agentConf.persona,
+    getMemory: () => memory?.read() || '',
+    onSay: (text) => primaryMascot()?.win.webContents.send('agent-event', { type: 'study', text }),
+    onState: ({ error }) => {
+      if (error === 'not-trusted') { studyNeedsPermission(); setStudy(false); }
+      else if (error === 'no-helper') { mascotSay('이 빌드엔 Claude 창 읽기 도구가 없어요'); setStudy(false); }
+    }
+  });
+  if (agentConf.study && process.platform === 'darwin') study.start();
   reminders = createReminders(path.join(app.getPath('userData'), 'reminders.json'), fireReminder);
   // 지난번에 쌓인 대화를 압축해서 기억에 합침 (뒤에서 조용히)
   setTimeout(() => memory.compress((p) => agent.summarize(p)).then((ok) => ok && console.log('[memory] 압축 완료')), 4000);
@@ -986,6 +999,40 @@ function startTalk() {
     if (!globalShortcut.register(k, fn)) { failedKeys.add(k); console.warn('[talk] 단축키 등록 실패 (다른 앱이 쓰는 중?):', k); }
   }
   sendMode();
+}
+
+// ===== 같이 공부 모드 (Claude 앱 창을 읽고 한두 마디 거듦) =====
+function studyNeedsPermission() {
+  mascotSay('Claude 창을 읽으려면 손쉬운 사용 권한이 필요해요. 시스템 설정에서 이 앱을 켜 주세요!');
+  shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility');
+}
+function setStudy(on) {
+  if (process.platform !== 'darwin') { mascotSay('같이 공부 모드는 Mac 에서만 돼요'); return; }
+  agentConf.study = !!on; saveAgentConf();
+  if (on) { study.start(); mascotSay('같이 볼게요! Claude한테 물어보면 옆에서 거들게요'); }
+  else study.stop();
+  refreshTrayMenu();
+  bridge?.broadcast({ type: 'study', payload: { on: !!on } });
+}
+async function studyTest() {
+  mascotSay('Claude 창 읽어 볼게요…');
+  const r = await study.test(app.getPath('userData'));
+  if (!r.ok) {
+    if (r.error === 'not-trusted') studyNeedsPermission();
+    else mascotSay({ 'no-app': 'Claude 앱이 안 켜져 있어요', 'no-window': 'Claude 창을 못 찾았어요', 'no-helper': '이 빌드엔 읽기 도구가 없어요' }[r.error] || '읽기 실패: ' + r.error);
+    return r;
+  }
+  const ex = r.extract;
+  mascotSay(ex.method === 'class' ? `읽었어요! 질문 ${ex.q}자, 답 ${ex.a}자` : '글은 읽었는데 질문/답 구분은 아직 못 해요. 파일을 보여 주세요!');
+  shell.showItemInFolder(r.file);
+  return r;
+}
+function studyItems() {
+  if (process.platform !== 'darwin') return [];
+  return [
+    { label: '📖 같이 공부 (Claude 앱 보며 거들기)', type: 'checkbox', checked: !!agentConf?.study, click: (item) => setStudy(item.checked) },
+    { label: '🔍 Claude 창 읽기 테스트', click: () => studyTest() }
+  ];
 }
 
 // ===== Claude 모드 =====
@@ -1115,8 +1162,12 @@ function claudeMenu() {
       { label: '🧠 기억 보기·고치기', click: () => { showTalk(true); showReply(true); whenLoaded(talk.reply, () => talk.reply.webContents.send('talk-memory')); } },
       { type: 'separator' },
       { label: '🗣 캐릭터 말투(지침)', click: () => { showTalk(true); showReply(true); whenLoaded(talk.reply, () => talk.reply.webContents.send('talk-persona')); } },
-      { label: '🔑 Claude 계정 로그인', click: doLogin }
+      { label: '🔑 Claude 계정 로그인', click: doLogin },
+      { type: 'separator' },
+      ...studyItems()
     ] : [
+      ...studyItems(),
+      { type: 'separator' },
       { label: '📋 클립보드 번역', click: () => clipAction('translate') },
       { label: '📋 클립보드 다듬기', click: () => clipAction('polish') },
       { label: '🍅 포모도로 시작/끝', click: () => handleCommand({ name: 'pomodoro.toggle' }) }
@@ -1297,6 +1348,8 @@ async function handleCommand(payload = {}, client) {
   let result;
   try {
     switch (name) {
+      case 'study.toggle': setStudy(!agentConf.study); result = { ok: true, study: !!agentConf.study }; break;
+      case 'study.test': { const t = await studyTest(); result = { ok: !!t.ok, error: t.error, extract: t.extract }; break; }
       case 'mode.set': setClaudeMode(args.on !== false); result = { ok: true, claude: claudeOn() }; break;
       case 'mode.toggle': setClaudeMode(!claudeOn()); result = { ok: true, claude: claudeOn() }; break;
       case 'expression.list': { const pm = primaryMascot(); result = { ok: true, expressions: pm?.expressions || [], current: pm?.expression || null }; break; }
