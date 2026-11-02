@@ -337,7 +337,7 @@ function createAgent({ onEvent, getOptions, getMemory = () => '', buildTools, on
   }
 
   // 도구 없이 한 번만 묻기 (기억 압축용). 가벼운 Haiku 로
-  async function summarize(prompt) {
+  async function summarize(prompt, system = '당신은 대화 기록을 짧은 메모로 압축하는 도우미입니다. 요청한 형식의 메모만 출력합니다.') {
     const opts = getOptions();
     const { query } = await loadSdk();
     const env = { ...process.env };
@@ -350,7 +350,7 @@ function createAgent({ onEvent, getOptions, getMemory = () => '', buildTools, on
         model: 'claude-haiku-5-5',
         tools: [],
         maxTurns: 1,
-        systemPrompt: '당신은 대화 기록을 짧은 메모로 압축하는 도우미입니다. 요청한 형식의 메모만 출력합니다.',
+        systemPrompt: system,
         settingSources: [],
         persistSession: false,
         pathToClaudeCodeExecutable: claudeExecutable(),

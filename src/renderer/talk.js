@@ -194,7 +194,22 @@ ipcRenderer.on('agent-event', (ev, e) => {
     }
     case 'note': addNote(e.text, true); if (/로그인/.test(e.text)) addLoginButton(); break;
     case 'done': setStatus(null); replyText.querySelector('.mutter')?.remove(); addCopyButton(e.result); break;
-    case 'clipDone': addNote('📋 결과를 클립보드에 복사해 뒀어요 (⌘V)'); break;
+    case 'clipStart':
+      showReply();
+      replyText.innerHTML = '';
+      { const src = document.createElement('div'); src.className = 'note'; src.textContent = `📋 ${e.label}: ${e.source}${e.source.length >= 80 ? '…' : ''}`; replyText.append(src); }
+      setStatus(e.label === '번역' ? '번역하는 중' : '다듬는 중');
+      break;
+    case 'clipResult': {
+      setStatus(null);
+      const div = document.createElement('div');
+      div.className = 'cliptext';
+      div.textContent = e.text;
+      replyText.append(div);
+      addNote('📋 클립보드에 넣어 뒀어요. ⌘V 로 붙여 넣으세요');
+      turns.push({ user: `📋 ${e.label}`, bot: e.text });
+      break;
+    }
     case 'reminder': showReply(); replyText.innerHTML = ''; addNote(''); replyText.lastChild.className = 'reminder'; replyText.lastChild.textContent = '⏰ ' + e.text; break;
     case 'error':
       setStatus(null);
@@ -327,6 +342,8 @@ async function send() {
 function autosize() {
   input.style.height = 'auto';
   input.style.height = Math.min(120, input.scrollHeight) + 'px';
+  // 입력칸 창 높이를 내용에 맞춤 (아래가 잘리지 않게)
+  if (PART === 'input') requestAnimationFrame(() => ipcRenderer.send('talk-input-height', document.body.scrollHeight));
 }
 input.addEventListener('input', autosize);
 input.addEventListener('keydown', (e) => {
@@ -349,6 +366,7 @@ $('histBtn').onclick = () => {
 const showUsage = (t) => { const u = $('usage'); if (u) { u.textContent = t || ''; u.style.display = t ? '' : 'none'; } };
 ipcRenderer.on('talk-usage', (ev, t) => showUsage(t));
 
+if (PART === 'input') { autosize(); new ResizeObserver(() => ipcRenderer.send('talk-input-height', document.body.scrollHeight)).observe($('composer')); }
 ipcRenderer.invoke('talk-state').then((st) => {
   showUsage(st.usage);
   setBusy(st.busy);

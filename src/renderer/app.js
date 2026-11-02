@@ -929,6 +929,7 @@ function onAgentEvent(e) {
       playMotion();
       agentSay(AGENT.TEXT.error, 5000);
       break;
+    case 'clipDone': agentFace('done', 2500); playMotion(); break;
     case 'pomodoro':   // 포모도로 단계 바뀜
       agentUi.quiet = false;
       if (e.phase === 'break' || e.phase === 'long' || e.phase === 'done') agentFace('done', 4000);

@@ -841,7 +841,8 @@ const agent = createAgent({
 
 // 입력칸은 캐릭터 발밑 가운데, 답변 말풍선은 캐릭터 옆(왼쪽, 자리가 없으면 오른쪽).
 // 발밑에 자리가 없으면 말 거는 동안만 캐릭터를 들어 올린다.
-const IN_W = 340, IN_H = 64, RE_W = 360, RE_H = 440;
+const IN_W = 340, RE_W = 360, RE_H = 440;
+let IN_H = 72;   // 입력칸 창 높이: 글 줄 수에 따라 talk-input-height 로 바뀜
 function mascotBox(pm) {
   const b = pm.win.getBounds();
   const ins = pm.inset || { left: 0, top: 0, right: b.width, bottom: b.height };
@@ -954,24 +955,48 @@ function startTalk() {
     [CLIP_KEYS.polish, () => clipAction('polish')],
     [SCREEN_KEY, () => captureScreen()]
   ];
-  for (const [k, fn] of keys) if (!globalShortcut.register(k, fn)) console.warn('[talk] 단축키 등록 실패:', k);
+  for (const [k, fn] of keys) {
+    if (!globalShortcut.register(k, fn)) { failedKeys.add(k); console.warn('[talk] 단축키 등록 실패 (다른 앱이 쓰는 중?):', k); }
+  }
 }
 
 // ===== 클립보드 번역·다듬기 =====
+const failedKeys = new Set();   // 다른 앱이 이미 쓰고 있어서 못 잡은 단축키 (메뉴에 표시)
 const CLIP_KEYS = { translate: 'CommandOrControl+Shift+1', polish: 'CommandOrControl+Shift+2' };
 const CLIP_PROMPTS = {
-  translate: (t) => `아래 글을 번역해 주세요. 한국어면 자연스러운 영어로, 그 밖의 언어면 자연스러운 한국어로. 번역문만 출력하고 다른 말은 붙이지 마세요.\n\n${t}`,
+  translate: (t) => {
+    // 원문 언어는 여기서 정함 (한글이 많으면 영어로, 아니면 한국어로)
+    const hangul = (t.match(/[가-힣]/g) || []).length, letters = (t.match(/\p{L}/gu) || []).length;
+    const to = hangul > letters * 0.3 ? '영어' : '한국어';
+    return `다음 글을 자연스러운 ${to}로 번역하세요. 원문과 같은 언어로 다시 쓰면 안 됩니다. 반드시 ${to}로 된 번역문만 출력하세요.\n\n<원문>\n${t}\n</원문>`;
+  },
   polish: (t) => `아래 글을 뜻은 그대로 두고 자연스럽고 매끄럽게 다듬어 주세요. 원래 언어 그대로, 다듬은 글만 출력하고 다른 말은 붙이지 마세요.\n\n${t}`
 };
+// 번역·다듬기는 캐릭터 대화와 따로, 도구 없이 한 번만 묻는다 (말투가 섞이지 않고 빠르고 싸다)
+const CLIP_SYSTEM = '당신은 번역가이자 교정 편집자입니다. 요청한 결과물(번역문 또는 다듬은 글)만 출력하고, 인사·설명·따옴표·머리말을 붙이지 않습니다.';
+let clipBusy = false;
 async function clipAction(kind) {
-  const text = clipboard.readText().trim();
+  const text = String(await clipboard.readText() || '').trim();   // Electron 44: readText 는 Promise
   showTalk(false);
   showReply(false);
-  if (!text) { sendTalk('agent-event', { type: 'note', text: '먼저 번역하거나 다듬을 글을 복사해 주세요 (⌘C)' }); return; }
-  if (agent.busy) { sendTalk('agent-event', { type: 'note', text: '지금 다른 일을 하는 중이에요. 끝나고 다시 눌러 주세요' }); return; }
-  const label = kind === 'translate' ? '📋 번역' : '📋 다듬기';
-  sendTalk('talk-user', `${label}: ${text.slice(0, 60)}${text.length > 60 ? '…' : ''}`);
-  agent.send(CLIP_PROMPTS[kind](text.slice(0, 8000)), { clip: true, noMemory: true, label }).catch((e) => sendTalk('agent-event', { type: 'error', message: e.message }));
+  if (!text) { sendTalk('agent-event', { type: 'note', text: '먼저 번역하거나 다듬을 글을 복사해 주세요 (⌘C)' }); return { ok: false, error: 'empty' }; }
+  if (clipBusy) return { ok: false, error: 'busy' };
+  clipBusy = true;
+  const label = kind === 'translate' ? '번역' : '다듬기';
+  sendTalk('agent-event', { type: 'clipStart', label, source: text.slice(0, 80) });
+  try {
+    const out = String(await agent.summarize(CLIP_PROMPTS[kind](text.slice(0, 8000)), CLIP_SYSTEM)).trim();
+    if (!out) throw new Error('결과가 비어 있어요');
+    await clipboard.writeText(out);
+    sendTalk('agent-event', { type: 'clipResult', label, text: out });
+    primaryMascot()?.win.webContents.send('agent-event', { type: 'clipDone' });
+    return { ok: true };
+  } catch (e) {
+    sendTalk('agent-event', { type: 'error', message: `${label}하지 못했어요: ${e.message}` });
+    return { ok: false, error: e.message };
+  } finally {
+    clipBusy = false;
+  }
 }
 
 async function changeWorkDir() {
@@ -1035,11 +1060,11 @@ function claudeMenu() {
       { label: `📁 작업 폴더: ${path.basename(agentConf.cwd || '')}`, enabled: !agent.busy, click: changeWorkDir },
       { label: '📂 작업 폴더 열기', click: () => shell.openPath(agentConf.cwd) },
       { type: 'separator' },
-      { label: `📋 클립보드 번역  (${process.platform === 'darwin' ? '⌘⇧1' : 'Ctrl+Shift+1'})`, click: () => clipAction('translate') },
-      { label: `📋 클립보드 다듬기  (${process.platform === 'darwin' ? '⌘⇧2' : 'Ctrl+Shift+2'})`, click: () => clipAction('polish') },
+      { label: `📋 클립보드 번역  (${failedKeys.has(CLIP_KEYS.translate) ? '단축키 안 됨: 다른 앱이 사용 중' : process.platform === 'darwin' ? '⌘⇧1' : 'Ctrl+Shift+1'})`, click: () => clipAction('translate') },
+      { label: `📋 클립보드 다듬기  (${failedKeys.has(CLIP_KEYS.polish) ? '단축키 안 됨: 다른 앱이 사용 중' : process.platform === 'darwin' ? '⌘⇧2' : 'Ctrl+Shift+2'})`, click: () => clipAction('polish') },
       { label: usageText() ? `${usageText()}  (${usage.five_hour?.resetsAt ? hhmm(usage.five_hour.resetsAt) + ' 리셋' : ''})` : '🔋 사용량: 대화하면 표시돼요', enabled: false },
       { type: 'separator' },
-      { label: `📸 화면 보고 도와줘  (${process.platform === 'darwin' ? '⌘⇧0' : 'Ctrl+Shift+0'})`, click: () => captureScreen() },
+      { label: `📸 화면 보고 도와줘  (${failedKeys.has(SCREEN_KEY) ? '단축키 안 됨: 다른 앱이 사용 중' : process.platform === 'darwin' ? '⌘⇧0' : 'Ctrl+Shift+0'})`, click: () => captureScreen() },
       { label: '🍅 포모도로 시작/끝', click: () => handleCommand({ name: 'pomodoro.toggle' }) },
       { label: '⏰ 알림 목록', click: () => { showTalk(true); showReply(false); sendTalk('agent-event', { type: 'note', text: reminders.list().map(reminders.describe).join('\n') || '맞춰 둔 알림이 없어요' }); } },
       { label: '🧠 기억 보기·고치기', click: () => { showTalk(true); showReply(true); whenLoaded(talk.reply, () => talk.reply.webContents.send('talk-memory')); } },
@@ -1071,6 +1096,12 @@ ipcMain.on('agent-answer', (event, { id, allow }) => agent.answer(id, allow));
 ipcMain.on('agent-stop', () => agent.stop());
 ipcMain.on('agent-login', () => doLogin());
 ipcMain.on('talk-hide', () => hideTalk());
+ipcMain.on('talk-input-height', (event, h) => {
+  const nh = Math.max(60, Math.min(200, Math.ceil(Number(h) || 72)));
+  if (nh === IN_H) return;
+  IN_H = nh;
+  placeTalk();
+});
 ipcMain.on('talk-ignore-mouse', (event, ignore) => BrowserWindow.fromWebContents(event.sender)?.setIgnoreMouseEvents(ignore, { forward: true }));
 ipcMain.handle('talk-state', () => ({ usage: usageText(), model: agentConf.model, cwd: agentConf.cwd, busy: agent.busy, shortcut: TALK_SHORTCUT }));
 // 캐릭터 더블클릭 / 승인 대기 중 클릭
@@ -1219,8 +1250,8 @@ async function handleCommand(payload = {}, client) {
       case 'talk.send': result = sendFromOutside(args.text); break;
       case 'agent.stop': agent.stop(); result = { ok: true }; break;
       case 'agent.newChat': newConversation(); result = { ok: true }; break;
-      case 'clip.translate': clipAction('translate'); result = { ok: true }; break;
-      case 'clip.polish': clipAction('polish'); result = { ok: true }; break;
+      case 'clip.translate': result = await clipAction('translate'); break;
+      case 'clip.polish': result = await clipAction('polish'); break;
       case 'screen.ask': result = await captureScreen(args.question); break;
       case 'pomodoro.start': result = { ok: true, state: pomodoro.start(args) }; break;
       case 'pomodoro.toggle': result = { ok: true, state: pomodoro.toggle(args) }; break;
