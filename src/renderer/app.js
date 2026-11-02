@@ -258,7 +258,7 @@ async function loadModel(model, { announce = true, auto = false } = {}) {
   if (!settings.gaze) mascot.resetFocus();
   applyHeight(settings.height);
   applyMotions();
-  if (announce) say(greeting(), undefined, { auto });
+  if (announce) say(AGENT.TEXT.hello, 5800, { auto, tts: false, lip: true });   // DeepSeek짱 인사
   return true;
 }
 
@@ -574,15 +574,6 @@ function timeText() {
   return `지금은 ${d.getHours()}시 ${String(d.getMinutes()).padStart(2, '0')}분이야`;
 }
 
-const IDLE_LINES = [
-  '가끔은 쉬자',
-  '커밋했어?',
-  '물 마시는 거 잊지 마',
-  '에러 안 났어?',
-  '잘 되어가고 있어?',
-  '어깨 한번 돌려봐'
-];
-
 // 아재개그：[질문, 정답] は質問を出して少し待ってから正解、[一行] はそのまま。直前と同じものは避ける
 let jokeTimer = null;
 let lastJoke = -1;
@@ -611,16 +602,8 @@ function talk() {
 function scheduleRandomEvent() {
   setTimeout(() => {
     if (settings.events && !isDragging) {
-      const idleVoices = voicesFor('idle');
-      if (idleVoices.length && Math.random() < 0.5) {
-        playVoice(pick(idleVoices), { auto: true });
-      } else {
-        playMotion();
-        if (Math.random() < 0.5) {
-          if (Math.random() < 0.6) tellJoke(true);
-          else say(pick(IDLE_LINES), undefined, { auto: true });
-        }
-      }
+      // 쉬는 동안엔 말없이 몸짓만 (DeepSeek짱처럼). 말은 일할 때의 추론 혼잣말로
+      if (!agentUi.running) playMotion();
     }
     scheduleRandomEvent();
   }, 60000 + Math.random() * 120000);
@@ -717,9 +700,7 @@ window.addEventListener('click', (e) => {
   clearTimeout(clickTimer);
   clickTimer = setTimeout(() => {
     if (agentOnClick()) return;
-    const clickVoices = voicesFor('click');
-    if (clickVoices.length && Math.random() < 0.5) playVoice(pick(clickVoices));
-    else playMotion();
+    clickReact();
   }, 250);
 });
 
@@ -840,9 +821,11 @@ const EXP_HINTS = {
   thinking: [/think|hmm|question|confus|wonder|생각|고민|考|悩/i, /relax|calm|normal/i],
   approval: [/sweat|panic|nervous|worr|땀|당황|焦|汗/i, /surpris|shock|놀람|驚/i],
   done: [/heart|love|happy|joy|smile|glad|하트|기쁨|웃|笑|喜/i],
-  error: [/tear|cry|sad|sorrow|눈물|슬픔|泣|悲/i, /dizzy|angry|어지|怒/i]
+  error: [/tear|cry|sad|sorrow|눈물|슬픔|泣|悲/i, /dizzy|angry|어지|怒/i],
+  blush: [/blush|shy|embarrass|홍조|부끄|照|赤|脸红/i],
+  smug: [/smug|grin|tease|얄미|ドヤ|得意/i]
 };
-const VRM_EXP = { thinking: 'relaxed', approval: 'surprised', done: 'happy', error: 'sad' };
+const VRM_EXP = { thinking: 'relaxed', approval: 'surprised', done: 'happy', error: 'sad', blush: 'happy', smug: 'relaxed' };
 
 function agentExpression(state) {
   const names = mascot.listExpressions();
@@ -868,6 +851,20 @@ function agentFace(state, ms = 0) {
 function agentSay(text, ms, opts = {}) {
   if (!text) return;
   if (say(text, ms, { tts: false, lip: true, ...opts })) agentUi.lastSayAt = Date.now();
+}
+
+// 클릭 반응 (DeepSeek짱 대사 + 표정). 3초 안에 6번 넘게 누르면 투덜, 8초 안에 5번이면 기분 좋음
+let clickTimes = [];
+function clickReact() {
+  const now = Date.now();
+  clickTimes = clickTimes.filter((t) => now - t < 8000); clickTimes.push(now);
+  const recent = clickTimes.filter((t) => now - t < 3000).length;
+  const line = AGENT.parseLine(recent >= 6 ? pick(AGENT.CLICK_SPAM) : clickTimes.length >= 5 ? pick(AGENT.CLICK_MANY) : pick(AGENT.CLICK));
+  if (recent >= 6 || clickTimes.length >= 5) clickTimes = [];
+  playMotion();
+  const face = line.faces.find((f) => agentExpression(f));
+  if (face) agentFace(face, 3500);
+  say(line.text, 3500, { tts: false, lip: true });
 }
 
 function agentOnClick() {

@@ -12,6 +12,22 @@ const TEXT = {
   noFolder: '어느 폴더에서 일할지 먼저 골라 주세요!'
 };
 
+// 캐릭터를 눌렀을 때 (DeepSeek짱 대사). [ ] 안은 표정: 하트·홍조·식은땀·얄미운·눈물
+const CLICK = [
+  '[홍조] 에헤헤, 쓰다듬어 주는 거예요?', '[홍조] 헤헤♪', '[홍조] 더 해 주세요!',
+  '[하트] 불렀어요?', '[홍조] 왜, 왜요?', '[얄미운] 흐응~?', '[식은땀] 앗, 깜짝이야!', '[하트, 홍조] 오늘도 화이팅이에요!',
+  '[홍조] 손 잡고 싶은 거예요?'
+];
+const CLICK_MANY = ['[하트, 홍조] 헤헤, 오늘 기분 좋은가 봐요?', '[하트, 홍조] 이러다 머리 다 헝클어지겠어요!'];
+const CLICK_SPAM = ['[얄미운] …그만 좀 눌러요.'];
+const FACE_TAG = { '하트': 'done', '홍조': 'blush', '><': 'blush', '식은땀': 'approval', '얄미운': 'smug', '눈물': 'error', '어두운': 'smug' };
+// '[하트, 홍조] 대사' → { text, faces: ['done', 'blush'] }
+function parseLine(line) {
+  const m = String(line).match(/^\[([^\]]+)\]\s*/);
+  if (!m) return { text: line, faces: [] };
+  return { text: line.slice(m[0].length), faces: m[1].split(',').map((t) => FACE_TAG[t.trim()]).filter(Boolean) };
+}
+
 // Claude Code 도구 이름 → 말풍선
 const TOOLS = {
   Bash: '명령 실행 중…', BashOutput: '명령 결과 보는 중…', KillShell: '명령 멈추는 중…',
@@ -87,4 +103,4 @@ function answerLine(text, max = 70) {
   return first.length > max ? first.slice(0, max - 1).trim() + '…' : first;
 }
 
-module.exports = { TEXT, TOOLS, toolLine, askLine, thoughtLine, thoughtParagraphs, answerLine, vtuberize };
+module.exports = { CLICK, CLICK_MANY, CLICK_SPAM, parseLine, TEXT, TOOLS, toolLine, askLine, thoughtLine, thoughtParagraphs, answerLine, vtuberize };
