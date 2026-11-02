@@ -4,7 +4,6 @@ const path = require('path');
 const { pathToFileURL, fileURLToPath } = require('url');
 const { FORMATS, formatOf, isModelFile, isSingleFileModel, modelFileLabel } = require('../shared/formats');
 const { isMotionFile, motionRoles } = require('../shared/motions');
-const { JOKES } = require('../shared/jokes');
 const AGENT = require('../shared/agent-lines');
 
 // ===== パス =====
@@ -574,36 +573,29 @@ function timeText() {
   return `지금은 ${d.getHours()}시 ${String(d.getMinutes()).padStart(2, '0')}분이야`;
 }
 
-// 아재개그：[질문, 정답] は質問を出して少し待ってから正解、[一行] はそのまま。直前と同じものは避ける
-let jokeTimer = null;
-let lastJoke = -1;
-const JOKE_Q_MS = 4000;   // 질문을 보여주고 정답을 내기까지
-const JOKE_A_MS = 6000;   // 정답 표시 시간
-
-function tellJoke(auto = false) {
-  if (!JOKES.length) return false;
-  let i;
-  do { i = Math.floor(Math.random() * JOKES.length); } while (JOKES.length > 1 && i === lastJoke);
-  const [q, a] = JOKES[i];
-  clearTimeout(jokeTimer);
-  if (!say(q, a ? JOKE_Q_MS + 500 : JOKE_A_MS, { tts: false, auto, lip: true })) return false;
-  lastJoke = i;
-  if (a) jokeTimer = setTimeout(() => say(a, JOKE_A_MS, { tts: false, auto: true, lip: true }), JOKE_Q_MS);
-  return true;
+// 혼잣말 한마디 (말투 지침대로 Haiku 가 미리 만들어 둔 줄을 하나씩. 메뉴·더블클릭·랜덤)
+let mutterBusy = false;
+async function idleMutter(auto = true) {
+  if (mutterBusy) return;
+  mutterBusy = true;
+  try {
+    const raw = await ipcRenderer.invoke('mutter-next');
+    if (!raw) return;
+    const line = AGENT.parseLine(raw);
+    playMotion();
+    const face = line.faces.find((f) => agentExpression(f));
+    if (face) agentFace(face, 4000);
+    say(line.text, Math.min(6000, Math.max(3500, 1500 + line.text.length * 90)), { tts: false, auto, lip: true });
+  } catch { /* 무시 */ } finally { mutterBusy = false; }
 }
-
-// 메뉴의 아재개그
-function talk() {
-  playMotion();
-  tellJoke(false);
-}
+function talk() { idleMutter(false); }
 
 // ランダムイベント（60〜180秒ごと）：半分はボイス、残りはしぐさ＋ひとこと
 function scheduleRandomEvent() {
   setTimeout(() => {
     if (settings.events && !isDragging) {
       // Claude 모드: 말없이 몸짓만 (말 걸기 창과 겹치지 않게)
-      // 피규어 모드: 절반은 혼잣말 (인사·시각·클릭 대사·아재개그)
+      // 피규어 모드: 절반은 혼잣말
       if (!claudeMode && Math.random() < 0.5) idleMutter();
       else if (!agentUi.running) playMotion();
     }
@@ -611,17 +603,6 @@ function scheduleRandomEvent() {
   }, 60000 + Math.random() * 120000);
 }
 scheduleRandomEvent();
-
-function idleMutter() {
-  const r = Math.random();
-  if (r < 0.3 && tellJoke(true)) { playMotion(); return; }
-  playMotion();
-  if (r < 0.5) { say(`${greeting()}\n${timeText()}`, 4500, { tts: false, auto: true, lip: true }); return; }
-  const line = AGENT.parseLine(pick(AGENT.CLICK));
-  const face = line.faces.find((f) => agentExpression(f));
-  if (face) agentFace(face, 3500);
-  say(line.text, 3800, { tts: false, auto: true, lip: true });
-}
 
 // 時報（毎時0分）。代表だけ
 let lastChimeHour = new Date().getHours();
@@ -720,7 +701,7 @@ window.addEventListener('click', (e) => {
 window.addEventListener('dblclick', (e) => {
   clearTimeout(clickTimer);
   if (claudeMode) ipcRenderer.send('agent-open');   // 더블클릭 = Claude에게 말 걸기
-  else { playMotion(); tellJoke(false); }           // 피규어 모드: 아재개그
+  else idleMutter(false);                            // 피규어 모드: 혼잣말 한마디
 });
 
 window.addEventListener('wheel', (e) => {
@@ -860,9 +841,9 @@ ipcRenderer.on('claude-mode', (event, { on }) => {
   claudeMode = !!on;
   if (was === claudeMode) return;
   playMotion();
-  say(claudeMode ? 'Claude 모드 켰어요! 더블클릭하면 말 걸 수 있어요' : '이제 그냥 피규어로 있을게요~ 더블클릭하면 아재개그!', 4000, { tts: false, lip: true });
+  say(claudeMode ? 'Claude 모드 켰어요! 더블클릭하면 말 걸 수 있어요' : '이제 그냥 피규어로 있을게요~ 더블클릭하면 혼잣말 한마디!', 4000, { tts: false, lip: true });
 });
-ipcRenderer.on('talk-visible', (event, v) => { talkVisible = !!v; if (v) { clearTimeout(jokeTimer); bubble.classList.remove('show'); } });
+ipcRenderer.on('talk-visible', (event, v) => { talkVisible = !!v; if (v) { bubble.classList.remove('show'); } });
 
 const agentUi = { running: false, ask: null, lastToolSay: 0, lastMutterAt: 0, lastSayAt: 0, expTimer: null, flashUntil: 0 };
 

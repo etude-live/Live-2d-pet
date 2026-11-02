@@ -11,6 +11,7 @@ const { createStore } = require('./characters');
 const { createAgent, login } = require('./agent');
 const { checkForUpdate, startAutoUpdate, currentBuild, justUpdated } = require('./updater');
 const { createMemory } = require('./memory');
+const { createMutter } = require('./mutter');
 const { createReminders } = require('./reminders');
 const { createPomodoro } = require('./pomodoro');
 const { z } = require('zod');
@@ -263,7 +264,7 @@ function refreshTrayMenu() {
     { label: '위치 초기화', click: resetPosition },
     { type: 'separator' },
     modeItem(),
-    claudeOn() ? { label: '💬 Claude에게 말 걸기', click: () => showTalk(true) } : { label: '🤣 아재개그', click: () => primaryMascot()?.win.webContents.send('menu-action', { type: 'talk' }) },
+    claudeOn() ? { label: '💬 Claude에게 말 걸기', click: () => showTalk(true) } : { label: '💭 혼잣말 한마디', click: () => primaryMascot()?.win.webContents.send('menu-action', { type: 'talk' }) },
     { label: '⚙️ 설정 열기', click: () => openSettingsWindow() },
     { label: '📜 크레딧', click: openCredits },
     { label: '📂 설정 폴더 열기', click: () => shell.openPath(app.getPath('userData')) },
@@ -724,7 +725,7 @@ onMascot('show-context-menu', async (m) => {
 
   const template = [
     modeItem(),
-    ...(claudeOn() ? [{ label: '💬 Claude에게 말 걸기', click: () => showTalk(true) }] : [{ label: '🤣 아재개그', click: () => act('talk') }]),
+    ...(claudeOn() ? [{ label: '💬 Claude에게 말 걸기', click: () => showTalk(true) }] : [{ label: '💭 혼잣말 한마디', click: () => act('talk') }]),
     claudeMenu(),
     { type: 'separator' },
     { label: '👗 모델', submenu: modelItems },
@@ -794,7 +795,7 @@ const alive = (w) => w && !w.isDestroyed();
 const sendTalk = (ch, msg) => { for (const w of [talk.reply, talk.input]) if (alive(w)) w.webContents.send(ch, msg); };
 
 // 기억·알림은 앱이 준비된 뒤 만든다 (userData 경로가 필요)
-let memory = null, reminders = null;
+let memory = null, reminders = null, mutter = null;
 
 // 캐릭터 전용 도구: Claude 가 직접 부른다 (mcp__mascot__*)
 const textResult = (t) => ({ content: [{ type: 'text', text: t }] });
@@ -957,6 +958,12 @@ setInterval(() => { if ((alive(talk.input) && talk.input.isVisible()) || (alive(
 function startTalk() {
   agentConf = loadAgentConf();
   memory = createMemory(path.join(app.getPath('userData'), 'memory'));
+  mutter = createMutter({
+    file: path.join(app.getPath('userData'), 'mutter.json'),
+    getPersona: () => agentConf.persona,
+    getMemory: () => memory?.read() || '',
+    generate: (p) => agent.summarize(p, '데스크톱 캐릭터의 혼잣말 대사를 만드는 작가. 요청한 대사 줄만 출력한다.')
+  });
   reminders = createReminders(path.join(app.getPath('userData'), 'reminders.json'), fireReminder);
   // 지난번에 쌓인 대화를 압축해서 기억에 합침 (뒤에서 조용히)
   setTimeout(() => memory.compress((p) => agent.summarize(p)).then((ok) => ok && console.log('[memory] 압축 완료')), 4000);
@@ -1126,6 +1133,7 @@ ipcMain.handle('agent-send', async (event, text) => {
   return null;
 });
 ipcMain.handle('claude-mode-get', () => claudeOn());
+ipcMain.handle('mutter-next', () => mutter?.next() || '');
 ipcMain.on('agent-answer', (event, { id, allow }) => agent.answer(id, allow));
 ipcMain.on('agent-stop', () => agent.stop());
 ipcMain.on('agent-login', () => doLogin());
