@@ -9,7 +9,7 @@ const { loadConfig } = require('./config');
 const { startBridge } = require('./bridge');
 const { createStore } = require('./characters');
 const { createAgent, login } = require('./agent');
-const { checkForUpdate, startAutoUpdate, currentBuild } = require('./updater');
+const { checkForUpdate, startAutoUpdate, currentBuild, justUpdated } = require('./updater');
 const { createMemory } = require('./memory');
 const { createReminders } = require('./reminders');
 const { createPomodoro } = require('./pomodoro');
@@ -72,7 +72,9 @@ if (!app.requestSingleInstanceLock()) {
     createTray();
     startBridgeFromConfig();
     startTalk();
-    startAutoUpdate({ beforeQuit: () => dropMascot() });
+    startAutoUpdate(updateOpts());
+    const upd = justUpdated();
+    if (upd) setTimeout(() => mascotSay(`빌드 ${upd.to}으로 업데이트됐어요!`), 3500);
   });
 }
 
@@ -259,7 +261,7 @@ function createTray() {
     { label: '⚙️ 설정 열기', click: () => openSettingsWindow() },
     { label: '📜 크레딧', click: openCredits },
     { label: '📂 설정 폴더 열기', click: () => shell.openPath(app.getPath('userData')) },
-    { label: `⬆️ 업데이트 확인 (빌드 ${currentBuild()})`, click: () => checkForUpdate({ manual: true, beforeQuit: () => dropMascot() }) },
+    { label: `⬆️ 업데이트 확인 (빌드 ${currentBuild()})`, click: () => checkForUpdate({ manual: true, ...updateOpts() }) },
     { type: 'separator' },
     { label: '❌ 종료', click: () => app.quit() }
   ]));
@@ -748,7 +750,7 @@ onMascot('show-context-menu', async (m) => {
     { type: 'separator' },
     { label: '⚙️ 설정 열기', click: () => openSettingsWindow(m.id) },
     { label: '📜 크레딧', click: openCredits },
-    { label: `⬆️ 업데이트 확인 (빌드 ${currentBuild()})`, click: () => checkForUpdate({ manual: true, beforeQuit: () => dropMascot() }) },
+    { label: `⬆️ 업데이트 확인 (빌드 ${currentBuild()})`, click: () => checkForUpdate({ manual: true, ...updateOpts() }) },
     { label: '🙈 숨기기(트레이에서 복원 가능)', click: () => m.win.hide() },
     { label: '❌ 종료', click: () => app.quit() }
   ];
@@ -1071,6 +1073,10 @@ ipcMain.handle('talk-state', () => ({ model: agentConf.model, cwd: agentConf.cwd
 // 캐릭터 더블클릭 / 승인 대기 중 클릭
 onMascot('agent-open', () => showTalk(true));
 onMascot('agent-answer', (m, { id, allow }) => agent.answer(id, allow));
+
+// 캐릭터가 한마디 (토큰 안 씀)
+const mascotSay = (text) => primaryMascot()?.win.webContents.send('bridge-event', { type: 'say', payload: { text } });
+const updateOpts = () => ({ beforeQuit: () => dropMascot(), say: mascotSay });
 
 // ===== 화면 보고 도와주기 =====
 // 캐릭터가 있는 화면을 찍어(긴 변 1568px 이하 JPEG, 약 2천 토큰) 다음 메시지에 붙인다.
