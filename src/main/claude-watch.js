@@ -5,7 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-const POLL_MS = 5000;        // 창 읽는 간격
+const POLL_MS = 2500;        // 창 읽는 간격
 const MIN_GAP = 20000;       // 거드는 최소 간격
 const Q_MAX = 900, A_HEAD = 1600, A_TAIL = 600;
 
@@ -28,7 +28,8 @@ function readWindow(app, { prompt = false } = {}) {
 // 답 끝에 이런 말이 있으면 Claude 가 아직 일하는 중 (도구 실행·생각)
 const BUSY = /(실행 중|생각 중|작업 중|검색 중|읽는 중|Running|Thinking|Searching|Working|Reading)[.…\s]*$/i;
 // 답에 이런 게 보이면 도구를 쓰는 작업 (중간에 오래 멈출 수 있음)
-const TOOLISH = /실행 중|명령어|Running|Ran |Read |Edit |Bash|도구|tool use|검색 중|Searched|Searching/i;
+// (대화 내용에 '명령어' 같은 말이 나오는 것만으로는 안 걸리게, 줄 머리의 상태 표시만 본다)
+const TOOLISH = /^(Ran|Read|Edited|Wrote|Searched|Fetched|Running|명령어 실행|명령 실행|실행 중|파일 (읽|수정|작성)|웹 검색)/m;
 const IS_USER = /user-message|font-user|human-turn|user-turn/i;
 const IS_AI = /claude-response|font-claude|claude-message|assistant-message|ai-turn/i;
 
@@ -120,7 +121,8 @@ function createClaudeWatch({ app, generate, getPersona, getMemory, onSay, onStat
       // 글이 안 바뀐 채로 두 번 = 답이 다 나옴
       if (key !== stableKey) { stableKey = key; stableCount = 0; log(`${info} 글이 바뀌는 중`); return; }
       // 그냥 대화면 5초, 도구를 쓰는 작업(코딩 등)이면 15초 조용해야 끝난 걸로 (도구 실행 중 잠깐 멈춘 것과 구분)
-      if (++stableCount < (sawTools ? 3 : 1)) return;
+      // 그냥 대화: 2.5초, 도구 작업: 12.5초
+      if (++stableCount < (sawTools ? 5 : 1)) return;
       if (ex.method !== 'tail' && BUSY.test(ex.a.slice(-80))) { log(`${info} 아직 실행 중 (끝: ${ex.a.slice(-30).replace(/\n/g, ' ')})`); return; }
       if (key === lastSaidKey) return;
       if (ex.method !== 'tail' && ex.q === saidQ) { log(`${info} 이 질문엔 이미 거듦`); lastSaidKey = key; return; }   // 질문 하나에 한 번만
@@ -144,10 +146,10 @@ function createClaudeWatch({ app, generate, getPersona, getMemory, onSay, onStat
     const prompt = [
       '너는 사용자 화면 옆에 사는 데스크톱 캐릭터다. 사용자가 Claude 에게 묻고 답을 받는 걸 옆에서 같이 보고 있다.',
       `<말투 지침>\n${persona}\n</말투 지침>`,
-      (getMemory() || '').trim() ? `<사용자에 대해 아는 것>\n${getMemory().slice(0, 300)}\n</사용자에 대해 아는 것>` : '',
+
       convo,
       lastLine ? `(네가 직전에 한 말: "${lastLine}" — 반복하지 마)` : '',
-      '마지막 질문과 답을 보고, 옆에서 공부를 같이 하는 친구처럼 한마디 거들어라. 핵심 짚기, 헷갈릴 만한 점, 다음에 물어보면 좋을 것, 가벼운 훈수나 칭찬 중 하나.',
+      '마지막 질문과 답에 옆에서 한마디 끼어들어라. 대화의 분위기를 그대로 따라라: 잡담이면 친구처럼 리액션·맞장구·장난 (공부·개발 얘기 꺼내지 말 것), 공부나 일 얘기면 핵심 짚기·헷갈릴 점·다음에 물어볼 것·가벼운 훈수 중 하나. 대화에 없는 주제를 끌어오지 마라.',
       '규칙: 1~2문장, 70자 이내, 말투 지침대로. 마크다운·따옴표 없이 대사만. 어울리면 맨 앞에 [하트] [홍조] [얄미운] [식은땀] [눈물] 중 하나. 되도록 한마디는 해라. 정말 아무 말도 어색할 때만 "-" 하나.'
     ].filter(Boolean).join('\n\n');
     const outText = String(await generate(prompt) || '').trim().split('\n')[0].replace(/^["“]|["”]$/g, '').trim();
