@@ -77,6 +77,7 @@ if (!app.requestSingleInstanceLock()) {
     startAutoUpdate(updateOpts());
     const upd = justUpdated();
     if (upd) setTimeout(() => mascotSay(`빌드 ${upd.to}으로 업데이트됐어요!`), 3500);
+    setTimeout(checkPermissions, upd ? 6000 : 3000);
   });
 }
 
@@ -1000,6 +1001,36 @@ function startTalk() {
     if (!globalShortcut.register(k, fn)) { failedKeys.add(k); console.warn('[talk] 단축키 등록 실패 (다른 앱이 쓰는 중?):', k); }
   }
   sendMode();
+}
+
+// ===== Mac 권한 (화면 녹화·손쉬운 사용) =====
+// 서명이 바뀌는 빌드에선 업데이트 때마다 권한이 풀린다. 한 번이라도 켰던 권한이 풀렸으면 한 번에 다시 켜도록 안내
+const PANES = {
+  screen: ['화면 및 시스템 오디오 녹음', 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture'],
+  ax: ['손쉬운 사용', 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility']
+};
+function permState() {
+  if (process.platform !== 'darwin') return {};
+  return { screen: systemPreferences.getMediaAccessStatus('screen') === 'granted', ax: systemPreferences.isTrustedAccessibilityClient(false) };
+}
+async function checkPermissions() {
+  if (process.platform !== 'darwin' || !agentConf) return;
+  const now = permState();
+  const had = agentConf.perms || {};
+  let changed = false;
+  for (const k of ['screen', 'ax']) if (now[k] && !had[k]) { had[k] = true; changed = true; }
+  if (changed) { agentConf.perms = had; saveAgentConf(); }
+  const lost = ['screen', 'ax'].filter((k) => had[k] && !now[k]);
+  if (!lost.length) return;
+  mascotSay('업데이트하면서 Mac 권한이 풀렸어요… 다시 켜 주세요!');
+  const names = lost.map((k) => PANES[k][0]).join(', ');
+  const { response } = await dialog.showMessageBox({
+    type: 'info',
+    message: `권한을 다시 켜 주세요: ${names}`,
+    detail: '업데이트하면 Mac이 이 앱을 새 앱으로 봐서 권한이 풀려요.\n\n각 설정 화면에서 목록의 Live2D Desktop Mascot을 골라 [−]로 지우고, [+]로 응용 프로그램 폴더의 앱을 다시 넣어 켜 주세요. 다 하면 앱을 껐다 켜 주세요.',
+    buttons: ['설정 열기', '나중에']
+  });
+  if (response === 0) lost.forEach((k, i) => setTimeout(() => shell.openExternal(PANES[k][1]), i * 1500));
 }
 
 // ===== 같이 공부 모드 (Claude 앱 창을 읽고 한두 마디 거듦) =====

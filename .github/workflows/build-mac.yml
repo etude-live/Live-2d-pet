@@ -48,12 +48,35 @@ jobs:
       - name: Build app (unpacked)
         run: npx electron-builder --mac dir --arm64 --publish never
 
-      - name: Ad-hoc sign and check
+      # 저장소 Secrets 에 고정 인증서(MAC_CERT_P12, MAC_CERT_PASSWORD)가 있으면 그걸로 서명한다.
+      # 서명이 매번 같아야 Mac 이 업데이트 뒤에도 같은 앱으로 보고 권한(화면 녹화·손쉬운 사용)을 유지한다.
+      # 없으면 예전처럼 ad-hoc 서명 (업데이트마다 권한이 풀림).
+      - name: Sign and check
+        env:
+          P12: ${{ secrets.MAC_CERT_P12 }}
+          P12_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
         run: |
           APP="$(ls -d dist/mac-arm64/*.app | head -1)"
           echo "APP=$APP" >> "$GITHUB_ENV"
-          codesign --force --deep --sign - "$APP"
+          if [ -n "$P12" ]; then
+            KC="$RUNNER_TEMP/sign.keychain-db"
+            security create-keychain -p ci "$KC"
+            security set-keychain-settings "$KC"
+            security unlock-keychain -p ci "$KC"
+            echo "$P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+            security import "$RUNNER_TEMP/cert.p12" -k "$KC" -P "$P12_PASSWORD" -T /usr/bin/codesign
+            security set-key-partition-list -S apple-tool:,apple: -s -k ci "$KC" > /dev/null
+            security list-keychains -d user -s "$KC" $(security list-keychains -d user | tr -d '"')
+            security find-identity -p codesigning "$KC"
+            ID=$(security find-identity -p codesigning "$KC" | awk '/^ *1\)/{print $2; exit}')
+            echo "고정 서명: $ID"
+            codesign --force --deep --sign "$ID" --keychain "$KC" "$APP"
+          else
+            echo "고정 인증서가 없어 ad-hoc 서명"
+            codesign --force --deep --sign - "$APP"
+          fi
           codesign --verify --deep --strict "$APP"
+          codesign -d -r- "$APP"
           # Claude 에이전트 실행 파일이 asar 밖에 풀려 있어야 실행할 수 있다
           EXE="$APP/Contents/Resources/app.asar.unpacked/node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64/claude"
           test -x "$EXE" && "$EXE" --version
