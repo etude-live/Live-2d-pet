@@ -42,14 +42,20 @@ function extract(nodes = []) {
     let j = i + 1;
     for (; j < nodes.length && nodes[j].d > n.d; j++) if (nodes[j].t) texts.push(nodes[j].t);
     if (n.t) texts.unshift(n.t);
-    blocks.push({ kind, text: texts.join('\n').trim() });
+    blocks.push({ kind, text: texts.join('\n').trim(), end: j, cls: (n.c || n.i || '').slice(0, 60) });
     i = j - 1;
   }
   const lastQ = blocks.map((b) => b.kind).lastIndexOf('q');
   if (lastQ >= 0) {
     const q = blocks[lastQ].text;
-    const a = blocks.slice(lastQ + 1).filter((b) => b.kind === 'a').map((b) => b.text).join('\n').trim();
-    return { method: 'class', q, a, blocks: blocks.length };
+    let a = blocks.slice(lastQ + 1).filter((b) => b.kind === 'a').map((b) => b.text).join('\n').trim();
+    let method = 'class';
+    if (!a) {
+      // 답 칸을 class 로 못 찾음 (새 답은 표시가 다를 수 있음): 질문 뒤의 글을 전부 답으로 (입력칸 글은 뺌)
+      a = nodes.slice(blocks[lastQ].end).filter((n) => n.t && n.r !== 'AXTextArea' && n.r !== 'AXTextField').map((n) => n.t).join('\n').trim();
+      method = 'class+after';
+    }
+    return { method, q, a, blocks: blocks.length, aiCls: [...new Set(blocks.filter((b) => b.kind === 'a').map((b) => b.cls))].join('|') };
   }
   const all = nodes.filter((n) => n.t).map((n) => n.t).join('\n');
   return { method: 'tail', q: '', a: '', tail: all.slice(-4000), blocks: 0 };
@@ -78,14 +84,14 @@ function createClaudeWatch({ app, generate, getPersona, getMemory, onSay, onStat
       const r = await readWindow(app);
       if (!r.ok) { log('읽기 실패: ' + r.error); onState?.({ error: r.error }); if (r.error === 'not-trusted' || r.error === 'no-helper') stop(); return; }
       const ex = extract(r.nodes);
-      const body = ex.method === 'class' ? `${ex.q}\n---\n${ex.a}` : ex.tail.slice(-1500);
+      const body = ex.method !== 'tail' ? `${ex.q}\n---\n${ex.a}` : ex.tail.slice(-1500);
       const info = `[${ex.method} 블록${ex.blocks} 질문${ex.q.length}자 답${ex.a.length}자 노드${r.nodes.length}]`;
-      if (!body.trim() || (ex.method === 'class' && ex.a.length < 10)) { log(`${info} 답이 아직 없음`); return; }
+      if (!body.trim() || (ex.method !== 'tail' && ex.a.length < 10)) { log(`${info} 답이 아직 없음`); return; }
       const key = crypto.createHash('sha1').update(body).digest('hex');
       // 글이 안 바뀐 채로 두 번 = 답이 다 나옴
       if (key !== stableKey) { stableKey = key; stableCount = 0; log(`${info} 글이 바뀌는 중`); return; }
       if (++stableCount < 2) return;   // 10초 넘게 그대로일 때만 (도구 실행 중 멈춰 있는 것과 구분)
-      if (ex.method === 'class' && BUSY.test(ex.a.slice(-80))) { log(`${info} 아직 실행 중 (끝: ${ex.a.slice(-30).replace(/\n/g, ' ')})`); return; }
+      if (ex.method !== 'tail' && BUSY.test(ex.a.slice(-80))) { log(`${info} 아직 실행 중 (끝: ${ex.a.slice(-30).replace(/\n/g, ' ')})`); return; }
       if (firstSeen) { firstSeen = false; lastSaidKey = key; log(`${info} 켤 때 있던 대화라 건너뜀`); return; }
       if (key === lastSaidKey) return;
       if (Date.now() - lastAt < MIN_GAP) { log(`${info} 방금 말해서 쉼`); return; }
@@ -101,7 +107,7 @@ function createClaudeWatch({ app, generate, getPersona, getMemory, onSay, onStat
 
   async function comment(ex) {
     const persona = (getPersona() || '').trim() || '밝고 다정한 데스크톱 마스코트. 존댓말, 살짝 장난스러움.';
-    const convo = ex.method === 'class'
+    const convo = ex.method !== 'tail'
       ? `<질문>\n${clip(ex.q, Q_MAX)}\n</질문>\n<Claude의 답>\n${clip(ex.a, A_HEAD, A_TAIL)}\n</Claude의 답>`
       : `<Claude 창 글 (끝부분, 마지막 질문과 답이 들어 있음)>\n${ex.tail}\n</Claude 창 글>`;
     const prompt = [
