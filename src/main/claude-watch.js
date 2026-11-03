@@ -113,7 +113,7 @@ function createClaudeWatch({ app, generate, getPersona, getMemory, onSay, onStat
           if (seenQ.size > 500) seenQ = new Set([...seenQ].slice(-200));
         }
         if (TOOLISH.test(ex.a)) sawTools = true;
-        else if (ex.a !== lastA) { if (ex.a.length > lastA.length) grew = true; lastA = ex.a; }
+        if (ex.a !== lastA) { if (ex.a.length > lastA.length) grew = true; lastA = ex.a; }
       }
       // 글이 안 바뀐 채로 두 번 = 답이 다 나옴
       if (key !== stableKey) { stableKey = key; stableCount = 0; log(`${info} 글이 바뀌는 중`); return; }
@@ -177,7 +177,7 @@ function createClaudeWatch({ app, generate, getPersona, getMemory, onSay, onStat
     return { ...r, nodes: undefined, file, extract: ex && { method: ex.method, q: ex.q.length, a: ex.a.length, blocks: ex.blocks } };
   }
 
-  return { start, stop, test, log, get on() { return on; } };
+  return { start, stop, test, log, _poll: () => { on = true; return poll(); }, get on() { return on; } };
 }
 
 module.exports = { createClaudeWatch, extract };
