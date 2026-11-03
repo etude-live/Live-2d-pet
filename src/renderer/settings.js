@@ -95,12 +95,12 @@ function acceptThumbDrop(tile, file, name) {
   tile.addEventListener('dragleave', () => tile.classList.remove('drop'));
   tile.addEventListener('drop', async (e) => {
     e.preventDefault();
-    e.stopPropagation();
     tile.classList.remove('drop');
     const f = e.dataTransfer.files[0];
     if (!f) return;
     const image = webUtils.getPathForFile(f);
-    if (!IMAGE_RE.test(image)) { alert('썸네일은 PNG·JPEG·WebP 이미지만 사용할 수 있습니다'); return; }
+    if (!IMAGE_RE.test(image)) return;   // 이미지가 아니면 모델 가져오기 (모델 칸이 받음)
+    e.stopPropagation();
     const info = await ipcRenderer.invoke('thumb-info', file);
     if (!info.editable) return;
     const verb = info.exists ? '교체할까요?' : '추가할까요?';
@@ -116,6 +116,22 @@ function acceptThumbDrop(tile, file, name) {
 // 一覧の外に落とした画像で窓が画像に置き換わらないように
 window.addEventListener('dragover', (e) => e.preventDefault());
 window.addEventListener('drop', (e) => e.preventDefault());
+
+// 모델 칸에 ZIP·.vrm·폴더를 놓으면 가져오기 (캐릭터 창은 클릭 통과라 Mac 에서 드롭이 바탕화면으로 빠짐)
+{
+  const grid = $('model-grid');
+  grid.addEventListener('dragover', (e) => { e.preventDefault(); grid.classList.add('drop'); });
+  grid.addEventListener('dragleave', (e) => { if (!grid.contains(e.relatedTarget)) grid.classList.remove('drop'); });
+  grid.addEventListener('drop', (e) => {
+    e.preventDefault();
+    grid.classList.remove('drop');
+    const f = e.dataTransfer.files[0];
+    if (!f) return;
+    const p = webUtils.getPathForFile(f);
+    if (IMAGE_RE.test(p)) return;   // 이미지는 타일(썸네일) 쪽에서 처리
+    act('import-path', { value: p });
+  });
+}
 
 async function fillCharacterThumb(s) {
   const c = s.characters.find((x) => x.id === s.target);

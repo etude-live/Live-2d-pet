@@ -1013,6 +1013,7 @@ ipcRenderer.on('settings-action', (event, a = {}) => {
     case 'set': applySetting(a.key, a.value); break;
     case 'model': if (typeof a.value === 'string') loadModel(a.value); break;
     case 'import-model': importModel(); break;
+    case 'import-path': if (typeof a.value === 'string') importModel(a.value); break;
     case 'select-model-file': selectModelFile(); break;
     case 'remove-model': removeLibraryModel(); break;
     case 'voice-pack': loadVoicePack(typeof a.value === 'string' ? a.value : ''); break;

@@ -72,7 +72,7 @@ class Live2DAdapter {
       const err = new Error(`moc3 ver ${version} には未対応です（このアプリは ver ${latest} まで）`);
       err.code = 'UNSUPPORTED_MOC';
       err.mocVersion = version;
-      err.userMessage = 'このモデルは Cubism 5.3 以降の形式で、\nまだ対応していないよ…';
+      err.userMessage = '이 모델은 더 새로운 Cubism 형식이라\n아직 못 불러와요…';
       throw err;
     }
   }
