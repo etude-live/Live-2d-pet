@@ -606,6 +606,73 @@ function scheduleRandomEvent() {
 }
 scheduleRandomEvent();
 
+// ===== クリック透過 =====
+// Linux: クリック透過の切り替えが効かない環境があるので、
+// ウィンドウの形（入力を受ける領域）をキャラと吹き出しの矩形に切り抜く
+const USE_SHAPE = process.platform === 'linux';
+let lastShape = '';
+
+function updateShape() {
+  let rects;
+  if (isDragging) {
+    rects = [{ x: 0, y: 0, width: window.innerWidth, height: window.innerHeight }];
+  } else {
+    rects = [];
+    const b = mascot.getBounds();
+    if (b) {
+      // 横は窓の幅いっぱい（形の外は描画も切れるため。VRM はモーションで体の範囲より外に腕が出る）
+      const y = Math.max(0, Math.floor(b.top));
+      rects.push({ x: 0, y, width: window.innerWidth, height: Math.min(window.innerHeight, Math.ceil(b.bottom)) - y });
+    }
+    if (bubble.classList.contains('show')) {
+      const r = bubble.getBoundingClientRect();
+      rects.push({ x: Math.floor(r.left), y: Math.floor(r.top), width: Math.ceil(r.width), height: Math.ceil(r.height) });
+    }
+    rects = rects.filter((r) => r.width > 0 && r.height > 0);
+  }
+  const key = JSON.stringify(rects);
+  if (key === lastShape) return;
+  lastShape = key;
+  ipcRenderer.send('set-shape', rects);
+}
+
+function updateHit(x, y) {
+  if (USE_SHAPE) { updateShape(); return; }
+  const hit = isDragging || mascot.hitTest(x, y);
+  if (hit === !ignoring) return;
+  ignoring = !hit;
+  ipcRenderer.send('set-ignore-mouse', ignoring);
+}
+
+ipcRenderer.on('cursor', (event, { x, y }) => {
+  if (settings.gaze) mascot.focus(x, y);
+  updateHit(x, y);
+});
+
+// ===== マウス操作 =====
+window.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+  ipcRenderer.send('show-context-menu'); // 中身はメインが最新の状態（settings-state）から作る
+});
+
+window.addEventListener('mousedown', (e) => {
+  if (e.button === 0) {
+    isDragging = true;
+    dragStartX = e.clientX;
+    dragStartY = e.clientY;
+    downScreenX = e.screenX;
+    downScreenY = e.screenY;
+  }
+});
+
+window.addEventListener('mousemove', (e) => {
+  if (isDragging) {
+    ipcRenderer.send('move-window', { mouseX: dragStartX, mouseY: dragStartY });
+  } else {
+    updateHit(e.clientX, e.clientY);
+  }
+});
+
 window.addEventListener('mouseup', () => { isDragging = false; });
 
 // クリック：ボイスがあれば半分の確率でしゃべる、なければしぐさ。
