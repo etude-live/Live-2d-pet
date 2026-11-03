@@ -5,8 +5,16 @@
   <title>마스코트 설정</title>
   <style>
     :root {
+      color-scheme: light dark;
       --blue: #5f7cf5; --blue-soft: #8fa6ff; --pink: #ff8fbd;
       --ink: #26315e; --ink-soft: #6a7298; --paper: #ffffff; --bg: #f5f7ff; --line: #e3e8ff; --tile: #eef1ff;
+      --sel: #e6ebff; --off: #d7dcf3; --thumb: #e6eaff;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --blue: #7d93ff; --blue-soft: #6f82e0; --ink: #e7eaff; --ink-soft: #a0a8d0;
+        --paper: #23263a; --bg: #171a2b; --line: #353b62; --tile: #2c3150; --sel: #333c6e; --off: #444a70; --thumb: #2c3150;
+      }
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { background: var(--bg); color: var(--ink); }
@@ -37,7 +45,7 @@
     .toggle { display: flex; align-items: center; justify-content: space-between; gap: 10px; cursor: pointer; }
     .toggle + .toggle { margin-top: 10px; }
     .toggle small { display: block; color: var(--ink-soft); font-size: 11px; font-weight: 400; }
-    .toggle input { appearance: none; flex: 0 0 38px; height: 22px; border-radius: 11px; background: #d7dcf3; position: relative; cursor: pointer; transition: background .15s; }
+    .toggle input { appearance: none; flex: 0 0 38px; height: 22px; border-radius: 11px; background: var(--off); position: relative; cursor: pointer; transition: background .15s; }
     .toggle input::after { content: ''; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: left .15s; box-shadow: 0 1px 3px #0002; }
     .toggle input:checked { background: var(--blue); }
     .toggle input:checked::after { left: 19px; }
@@ -52,13 +60,13 @@
     .model-grid .group { grid-column: 1 / -1; font-size: 11px; color: var(--ink-soft); }
     .model-tile { background: none; border: 1.5px solid transparent; border-radius: 12px; padding: 4px; display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 11px; min-width: 0; white-space: normal; }
     .model-tile:hover { background: var(--tile); }
-    .model-tile.selected { border-color: var(--blue); background: #e6ebff; }
+    .model-tile.selected { border-color: var(--blue); background: var(--sel); }
     .model-tile.drop { border: 1.5px dashed var(--blue); }
-    .model-tile .thumb { width: 100%; aspect-ratio: 1; border-radius: 10px; overflow: hidden; background: #e6eaff; display: grid; place-items: center; }
+    .model-tile .thumb { width: 100%; aspect-ratio: 1; border-radius: 10px; overflow: hidden; background: var(--thumb); display: grid; place-items: center; }
     .model-tile .thumb img { width: 100%; height: 100%; object-fit: cover; }
     .model-tile .name { width: 100%; text-align: center; line-height: 1.3; word-break: break-all; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
     .initial { font-size: 24px; font-weight: 700; color: var(--blue-soft); }
-    .mini-thumb { flex: 0 0 34px; height: 34px; border-radius: 10px; overflow: hidden; background: #e6eaff; display: grid; place-items: center; }
+    .mini-thumb { flex: 0 0 34px; height: 34px; border-radius: 10px; overflow: hidden; background: var(--thumb); display: grid; place-items: center; }
     .mini-thumb img { width: 100%; height: 100%; object-fit: cover; }
     .mini-thumb .initial { font-size: 15px; }
     .foot { display: flex; flex-wrap: wrap; gap: 6px; }

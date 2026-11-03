@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, screen, dialog, shell, globalShortcut, clipboard, Notification, desktopCapturer, systemPreferences } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, screen, dialog, shell, globalShortcut, clipboard, Notification, desktopCapturer, systemPreferences, nativeTheme } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const tracker = require('./tracker');
@@ -359,7 +359,7 @@ function openSettingsWindow(targetId) {
     title: '마스코트 설정',
     autoHideMenuBar: true,
     alwaysOnTop: true,
-    backgroundColor: '#f5f7ff',
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#171a2b' : '#f5f7ff',
     webPreferences: { nodeIntegration: true, contextIsolation: false }
   });
   settingsWindow.loadFile(path.join(__dirname, '../renderer/settings.html'));

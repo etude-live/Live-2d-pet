@@ -81,3 +81,11 @@ body, html {
   border: 2px dashed #b9c6ff;
 }
 #bubble.mutter::after { border-color: #b9c6ff; border-style: dashed; }
+
+/* 다크 모드: 시스템 설정을 따라감 */
+@media (prefers-color-scheme: dark) {
+  #bubble { background: #262a40f7; color: #e7eaff; border-color: #6f82e0; box-shadow: 0 6px 18px #0006; }
+  #bubble::after { border-right-color: #6f82e0; border-bottom-color: #6f82e0; }
+  #bubble.mutter { background: #1f2236f2; color: #a7afd8; border-color: #5a6bc0; }
+  #bubble.mutter::after { border-color: #5a6bc0; }
+}
