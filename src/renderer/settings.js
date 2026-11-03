@@ -134,94 +134,57 @@ function fillCharacterSelect(s) {
   $('btn-remove-character').disabled = s.characters.length <= 1;
 }
 
-function fillVoiceSelect(s) {
-  const sel = $('voice-pack-select');
-  if (!idle(sel)) return;
-  sel.innerHTML = '';
-  sel.add(new Option('없음', ''));
-  for (const name of s.voicePacks) sel.add(new Option(name, name));
-  sel.value = s.settings.voicePack;
-}
-
-// 声の出し方（マスコット側の voiceModeOf と同じ）
-function voiceModeOf(st) {
-  if (st.mute) return 'mute';
-  if (!st.voice) return 'pack';
-  return st.ttsEngine === 'os' ? 'os' : 'voicevox';
-}
-
-const VOICE_HINTS = {
-  pack: '보이스팩의 목소리로 말합니다. 자작 대사(한마디·시보 등)는 자막으로만 나옵니다',
-  voicevox: '보이스팩 대사도 자작 대사도 이 화자가 말합니다. VOICEVOX가 실행 중이 아니면 보이스팩 목소리를 씁니다',
-  os: '보이스팩 목소리 + 자작 대사는 OS 읽어주기',
-  mute: '소리를 내지 않습니다. 자막과 동작만 나옵니다'
-};
-
 function render(s) {
   if (!s) return;
-  const prevMode = state ? voiceModeOf(state.settings) : null;
   state = s;
   const st = s.settings;
-  const mode = voiceModeOf(st);
-
   fillCharacterSelect(s);
   fillCharacterThumb(s);
   fillModelGrid(s);
   $('btn-remove-model').disabled = !st.model.startsWith('lib:');
-  fillVoiceSelect(s);
-
   const setVal = (id, v) => { if (idle($(id))) $(id).value = v; };
-  setVal('voice-mode-select', mode);
-  $('voice-mode-hint').textContent = VOICE_HINTS[mode];
-  setVal('speed-range', st.voicevoxSpeed);
   setVal('height-range', st.height);
   setVal('opacity-range', st.opacity);
-  $('speed-val').textContent = '×' + Number(st.voicevoxSpeed).toFixed(2);
   $('height-val').textContent = st.height + ' px';
   $('opacity-val').textContent = Math.round(st.opacity * 100) + '%';
-
   $('gaze-check').checked = st.gaze;
-  $('events-check').checked = st.events;
-  $('chime-check').checked = st.chime;
-  $('chime-check').disabled = !s.primary;
-  $('chime-row').classList.toggle('disabled', !s.primary);
-  $('chime-note').textContent = s.primary ? '' : '(대표만)';
-  $('follow-check').checked = s.followSupported && st.follow !== false;
-  $('follow-check').disabled = !s.followSupported;
-  $('follow-row').classList.toggle('disabled', !s.followSupported);
-  $('follow-note').textContent = s.followSupported ? '' : '(Windows 전용)';
-
-  $('voicevox-settings').style.display = mode === 'voicevox' ? 'block' : 'none';
-  if (mode === 'voicevox' && prevMode !== 'voicevox') refreshSpeakers();
-  else if ($('speaker-select').options.length && idle($('speaker-select'))) {
-    $('speaker-select').value = String(st.voicevoxSpeaker);
-  }
 }
 
-// VOICEVOX の話者一覧（メインプロセス経由）
-async function refreshSpeakers() {
-  const sel = $('speaker-select');
-  const credit = $('voicevox-credit');
-  sel.innerHTML = '';
-  const speakers = await ipcRenderer.invoke('voicevox-speakers');
-  if (!speakers) {
-    sel.add(new Option('엔진에 연결할 수 없음', ''));
-    sel.disabled = true;
-    credit.textContent = 'VOICEVOX(127.0.0.1:50021)를 실행해 주세요';
-    return;
+// ===== Claude 설정 (메인이 가진 값) =====
+async function renderClaude() {
+  const c = await ipcRenderer.invoke('claude-settings-get');
+  $('claude-check').checked = c.claude;
+  $('study-check').checked = c.study;
+  $('study-check').disabled = !c.mac;
+  $('study-row').style.opacity = c.mac ? 1 : 0.5;
+  const sel = $('model-select');
+  if (idle(sel)) {
+    sel.innerHTML = '';
+    for (const [id, label] of c.models) sel.add(new Option(label, id));
+    sel.value = c.model;
   }
-  for (const sp of speakers) {
-    for (const style of sp.styles) {
-      const opt = new Option(`${sp.name}（${style.name}）`, style.id);
-      opt.dataset.name = sp.name;
-      sel.add(opt);
-    }
+  $('usage').textContent = c.usage || '';
+  $('ver').textContent = `빌드 ${c.build}`;
+  $('keys').innerHTML = '';
+  for (const [k, what] of c.keys) {
+    const kb = document.createElement('kbd'); kb.textContent = k;
+    const sp = document.createElement('span'); sp.textContent = what;
+    $('keys').append(kb, sp);
   }
-  sel.disabled = false;
-  sel.value = String(state?.settings.voicevoxSpeaker ?? '');
-  if (sel.selectedIndex < 0) sel.selectedIndex = 0;
-  credit.textContent = 'VOICEVOX:' + (sel.selectedOptions[0]?.dataset.name || '');
 }
+const claudeAct = (action, value) => ipcRenderer.invoke('claude-settings', { action, value }).then(renderClaude);
+$('claude-check').onchange = (e) => claudeAct('mode', e.target.checked);
+$('study-check').onchange = (e) => claudeAct('study', e.target.checked);
+$('model-select').onchange = (e) => { e.target.blur(); claudeAct('model', e.target.value); };
+$('btn-persona').onclick = () => claudeAct('persona');
+$('btn-memory').onclick = () => claudeAct('memory');
+$('btn-login').onclick = () => claudeAct('login');
+$('btn-update').onclick = () => claudeAct('update');
+$('btn-credits').onclick = () => claudeAct('credits');
+$('btn-open-data').onclick = () => claudeAct('data');
+ipcRenderer.on('claude-settings-changed', renderClaude);
+window.addEventListener('focus', renderClaude);
+renderClaude();
 
 // ===== 操作 =====
 $('character-select').onchange = (e) => {
@@ -237,31 +200,17 @@ $('btn-remove-character').onclick = () => {
 $('btn-import-model').onclick = () => act('import-model');
 $('btn-select-file').onclick = () => act('select-model-file');
 $('btn-open-library').onclick = () => ipcRenderer.send('library-open');
-$('btn-open-motions').onclick = () => ipcRenderer.send('motions-open');
 $('btn-remove-model').onclick = () => {
   const m = state?.settings.model || '';
   if (!m.startsWith('lib:')) return;
   if (confirm(`「${m.slice(4)}」을(를) 라이브러리에서 삭제할까요?`)) act('remove-model');
 };
-$('voice-pack-select').onchange = (e) => { e.target.blur(); act('voice-pack', { value: e.target.value }); };
-$('btn-test-voice').onclick = () => act('test-voice');
-$('btn-test-tts').onclick = () => act('test-tts');
-$('voice-mode-select').onchange = (e) => { e.target.blur(); act('voice-mode', { value: e.target.value }); };
-$('speaker-select').onchange = (e) => {
-  set('voicevoxSpeaker', Number(e.target.value));
-  $('voicevox-credit').textContent = 'VOICEVOX:' + (e.target.selectedOptions[0]?.dataset.name || '');
-  e.target.blur();
-};
-$('speed-range').oninput = (e) => set('voicevoxSpeed', parseFloat(e.target.value));
 $('height-range').oninput = (e) => set('height', parseFloat(e.target.value));
 $('opacity-range').oninput = (e) => set('opacity', parseFloat(e.target.value));
 $('gaze-check').onchange = (e) => set('gaze', e.target.checked);
-$('follow-check').onchange = (e) => set('follow', e.target.checked);
-$('events-check').onchange = (e) => set('events', e.target.checked);
-$('chime-check').onchange = (e) => set('chime', e.target.checked);
 
 // スライダーは離したらフォーカスを外す（以降の状態更新を反映させる）
-for (const id of ['speed-range', 'height-range', 'opacity-range']) {
+for (const id of ['height-range', 'opacity-range']) {
   $(id).addEventListener('change', (e) => e.target.blur());
 }
 

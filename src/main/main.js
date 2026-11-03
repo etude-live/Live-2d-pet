@@ -262,15 +262,13 @@ function createTray() {
 function refreshTrayMenu() {
   if (!tray) return;
   tray.setContextMenu(Menu.buildFromTemplate([
+    ...mainItems(),
+    { type: 'separator' },
+    claudeMenu(),
+    { type: 'separator' },
     { label: '표시 / 숨기기', click: toggleVisible },
     { label: '위치 초기화', click: resetPosition },
-    { type: 'separator' },
-    modeItem(),
-    claudeOn() ? { label: '💬 Claude에게 말 걸기', click: () => showTalk(true) } : { label: '💭 혼잣말 한마디', click: () => primaryMascot()?.win.webContents.send('menu-action', { type: 'talk' }) },
-    { label: '⚙️ 설정 열기', click: () => openSettingsWindow() },
-    { label: '📜 크레딧', click: openCredits },
-    { label: '📂 설정 폴더 열기', click: () => shell.openPath(app.getPath('userData')) },
-    { label: `⬆️ 업데이트 확인 (빌드 ${currentBuild()})`, click: () => checkForUpdate({ manual: true, ...updateOpts() }) },
+    { label: '⚙️ 설정…', click: () => openSettingsWindow() },
     { type: 'separator' },
     { label: '❌ 종료', click: () => app.quit() }
   ]));
@@ -361,7 +359,7 @@ function openSettingsWindow(targetId) {
     title: '마스코트 설정',
     autoHideMenuBar: true,
     alwaysOnTop: true,
-    backgroundColor: '#252526',
+    backgroundColor: '#f5f7ff',
     webPreferences: { nodeIntegration: true, contextIsolation: false }
   });
   settingsWindow.loadFile(path.join(__dirname, '../renderer/settings.html'));
@@ -686,8 +684,6 @@ onMascot('show-context-menu', async (m) => {
   const st = state?.settings || {};
   const act = (type, extra = {}) => m.win.webContents.send('settings-action', { type, ...extra });
   const set = (key, value) => act('set', { key, value });
-  const isPrimary = m.id === store.primary();
-  const mode = voiceModeOf(st);
 
   // モデル：同梱・ライブラリ・外部（直接開いたファイル）
   const modelItems = [];
@@ -704,71 +700,28 @@ onMascot('show-context-menu', async (m) => {
   }
   if (!modelItems.length) modelItems.push({ label: '(모델이 없습니다)', enabled: false });
 
-  // VOICEVOX の話者：話者 ▸ スタイル。エンジンが起動していなければ灰色
-  const speakers = mode === 'voicevox' ? await voicevoxSpeakers({ quick: true }) : null;
-  let speakerItem;
-  if (speakers) {
-    speakerItem = {
-      label: '🎙 VOICEVOX 화자',
-      submenu: speakers.map((sp) => ({
-        // サブメニューを持つ項目にはチェックを付けられないので、今の話者は印で示す
-        label: (sp.styles.some((t) => t.id === st.voicevoxSpeaker) ? '● ' : '　') + sp.name,
-        submenu: sp.styles.map((t) => ({
-          label: t.name,
-          type: 'radio',
-          checked: t.id === st.voicevoxSpeaker,
-          click: () => set('voicevoxSpeaker', t.id)
-        }))
-      }))
-    };
-  } else {
-    speakerItem = {
-      label: mode === 'voicevox' ? '🎙 VOICEVOX 화자(엔진 미실행)' : '🎙 VOICEVOX 화자',
-      enabled: false
-    };
-  }
-
+  const exps = m.expressions || [];
   const template = [
-    modeItem(),
-    ...(claudeOn() ? [{ label: '💬 Claude에게 말 걸기', click: () => showTalk(true) }] : [{ label: '💭 혼잣말 한마디', click: () => act('talk') }]),
+    ...mainItems(),
+    { type: 'separator' },
     claudeMenu(),
-    { type: 'separator' },
-    { label: '👗 모델', submenu: modelItems },
     {
-      label: m.expressions?.length ? `😊 표정 (${m.expressions.length}개)` : '😊 표정 (이 모델엔 없음)',
-      enabled: !!m.expressions?.length,
-      submenu: (m.expressions || []).map((name) => ({ label: name, type: 'checkbox', checked: m.expression === name, click: () => act('expression', { value: name }) })).concat(
-        m.expressions?.length ? [{ type: 'separator' }, { label: '원래 얼굴로', click: () => act('expression', { value: null }) }] : [])
-    },
-    {
-      label: '🔊 음성',
-      submenu: VOICE_MODES.map(([value, label]) => ({
-        label, type: 'radio', checked: mode === value, click: () => act('voice-mode', { value })
-      }))
-    },
-    speakerItem,
-    { type: 'separator' },
-    { label: '👀 시선 추적', type: 'checkbox', checked: st.gaze !== false, click: (item) => set('gaze', item.checked) },
-    { label: '🎲 랜덤 이벤트', type: 'checkbox', checked: st.events !== false, click: (item) => set('events', item.checked) },
-    {
-      label: isPrimary ? '🕐 시보' : '🕐 시보(대표만)',
-      type: 'checkbox',
-      checked: st.chime !== false,
-      enabled: isPrimary,
-      click: (item) => set('chime', item.checked)
-    },
-    {
-      label: tracker.supported ? '📌 VS Code 따라가기' : '📌 VS Code 따라가기(Windows 전용)',
-      type: 'checkbox',
-      checked: follows(m),
-      enabled: tracker.supported,
-      click: (item) => set('follow', item.checked)
+      label: '👗 캐릭터',
+      submenu: [
+        ...modelItems,
+        { type: 'separator' },
+        ...(exps.length ? [{
+          label: '😊 표정',
+          submenu: exps.map((name) => ({ label: name, type: 'checkbox', checked: m.expression === name, click: () => act('expression', { value: name }) }))
+            .concat([{ type: 'separator' }, { label: '원래 얼굴로', click: () => act('expression', { value: null }) }])
+        }] : []),
+        { label: '👀 시선 추적', type: 'checkbox', checked: st.gaze !== false, click: (item) => set('gaze', item.checked) },
+        { label: '모델 가져오기…', click: () => act('import-model') }
+      ]
     },
     { type: 'separator' },
-    { label: '⚙️ 설정 열기', click: () => openSettingsWindow(m.id) },
-    { label: '📜 크레딧', click: openCredits },
-    { label: `⬆️ 업데이트 확인 (빌드 ${currentBuild()})`, click: () => checkForUpdate({ manual: true, ...updateOpts() }) },
-    { label: '🙈 숨기기(트레이에서 복원 가능)', click: () => m.win.hide() },
+    { label: '⚙️ 설정…', click: () => openSettingsWindow(m.id) },
+    { label: '🙈 숨기기', click: () => m.win.hide() },
     { label: '❌ 종료', click: () => app.quit() }
   ];
   if (m.win.isDestroyed()) return;
@@ -1044,6 +997,7 @@ function setStudy(on) {
   if (on) { study.start(); mascotSay('같이 볼게요! Claude한테 물어보면 옆에서 거들게요'); }
   else study.stop();
   refreshTrayMenu();
+  settingsWindow?.webContents.send('claude-settings-changed');
   bridge?.broadcast({ type: 'study', payload: { on: !!on } });
 }
 async function studyTest() {
@@ -1083,6 +1037,7 @@ function setClaudeMode(on) {
   if (!on) { hideTalk(); agent.stop(); }
   sendMode();
   refreshTrayMenu();
+  settingsWindow?.webContents.send('claude-settings-changed');
   bridge?.broadcast({ type: 'mode', payload: { claude: !!on } });
 }
 
@@ -1175,39 +1130,94 @@ ipcMain.on('agent-login-code', (event, code) => loginRun?.sendCode(code));
 ipcMain.on('open-url', (event, url) => { if (/^https:\/\/[a-z0-9.-]*claude\.(ai|com)\//i.test(url)) shell.openExternal(url); });
 
 // 메뉴(캐릭터 우클릭·트레이)에 넣는 Claude 항목
+const KEY = (k) => (failedKeys.has(k) ? '(단축키 안 됨)' : k.replace('CommandOrControl', process.platform === 'darwin' ? '⌘' : 'Ctrl').replace('+Shift', process.platform === 'darwin' ? '⇧' : '+Shift').replace(/\+/g, process.platform === 'darwin' ? '' : '+'));
+
+// 메뉴 맨 위: 자주 쓰는 것만
+function mainItems() {
+  const p = pomodoro.state();
+  const mmss = (sec) => `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+  return [
+    claudeOn()
+      ? { label: `💬 말 걸기\t${KEY(TALK_SHORTCUT)}`, click: () => showTalk(true) }
+      : { label: '💭 혼잣말 한마디', click: () => primaryMascot()?.win.webContents.send('menu-action', { type: 'talk' }) },
+    ...(process.platform === 'darwin' ? [{ label: '📖 같이 공부', type: 'checkbox', checked: !!agentConf?.study, click: (item) => setStudy(item.checked) }] : []),
+    p.running
+      ? { label: `🍅 포모도로 멈추기  (${p.phase === 'work' ? '집중' : '휴식'} ${mmss(p.remainingSec)})`, click: () => handleCommand({ name: 'pomodoro.stop' }) }
+      : { label: '🍅 포모도로 시작', click: () => handleCommand({ name: 'pomodoro.start' }) },
+    {
+      label: '🧰 도구',
+      submenu: [
+        { label: `📋 클립보드 번역\t${KEY(CLIP_KEYS.translate)}`, click: () => clipAction('translate') },
+        { label: `📋 클립보드 다듬기\t${KEY(CLIP_KEYS.polish)}`, click: () => clipAction('polish') },
+        ...(claudeOn() ? [{ label: `📸 화면 보고 도와줘\t${KEY(SCREEN_KEY)}`, click: () => captureScreen() }] : []),
+        { label: '⏰ 알림 목록', enabled: claudeOn(), click: () => { showTalk(true); showReply(false); sendTalk('agent-event', { type: 'note', text: reminders.list().map(reminders.describe).join('\n') || '맞춰 둔 알림이 없어요' }); } }
+      ]
+    }
+  ];
+}
+
+// Claude 설정 묶음
 function claudeMenu() {
+  const on = claudeOn();
   return {
     label: '🤖 Claude',
-    submenu: claudeOn() ? [
-      { label: `말 걸기  (${process.platform === 'darwin' ? '⌘⇧Space' : 'Ctrl+Shift+Space'} · 더블클릭)`, click: () => showTalk(true) },
-      { label: '🆕 새 대화', enabled: !agent.busy, click: newConversation },
+    submenu: [
+      modeItem(),
       { type: 'separator' },
+      { label: '🆕 새 대화', enabled: on && !agent.busy, click: newConversation },
       { label: '모델', submenu: MODELS.map(([id, label]) => ({ label, type: 'radio', checked: agentConf.model === id, click: () => setModel(id) })) },
-      { label: `📁 작업 폴더: ${path.basename(agentConf.cwd || '')}`, enabled: !agent.busy, click: changeWorkDir },
-      { label: '📂 작업 폴더 열기', click: () => shell.openPath(agentConf.cwd) },
-      { type: 'separator' },
-      { label: `📋 클립보드 번역  (${failedKeys.has(CLIP_KEYS.translate) ? '단축키 안 됨: 다른 앱이 사용 중' : process.platform === 'darwin' ? '⌘⇧1' : 'Ctrl+Shift+1'})`, click: () => clipAction('translate') },
-      { label: `📋 클립보드 다듬기  (${failedKeys.has(CLIP_KEYS.polish) ? '단축키 안 됨: 다른 앱이 사용 중' : process.platform === 'darwin' ? '⌘⇧2' : 'Ctrl+Shift+2'})`, click: () => clipAction('polish') },
+      { label: '🗣 말투(지침)', click: () => openPanel('talk-persona') },
+      { label: '🧠 기억', click: () => openPanel('talk-memory') },
+      { label: `📁 작업 폴더: ${path.basename(agentConf.cwd || '')}`, submenu: [
+        { label: '열기', click: () => shell.openPath(agentConf.cwd) },
+        { label: '바꾸기…', enabled: !agent.busy, click: changeWorkDir }
+      ] },
       { label: usageText() ? `${usageText()}  (${usage.five_hour?.resetsAt ? hhmm(usage.five_hour.resetsAt) + ' 리셋' : ''})` : '🔋 사용량: 대화하면 표시돼요', enabled: false },
-      { type: 'separator' },
-      { label: `📸 화면 보고 도와줘  (${failedKeys.has(SCREEN_KEY) ? '단축키 안 됨: 다른 앱이 사용 중' : process.platform === 'darwin' ? '⌘⇧0' : 'Ctrl+Shift+0'})`, click: () => captureScreen() },
-      { label: '🍅 포모도로 시작/끝', click: () => handleCommand({ name: 'pomodoro.toggle' }) },
-      { label: '⏰ 알림 목록', click: () => { showTalk(true); showReply(false); sendTalk('agent-event', { type: 'note', text: reminders.list().map(reminders.describe).join('\n') || '맞춰 둔 알림이 없어요' }); } },
-      { label: '🧠 기억 보기·고치기', click: () => { showTalk(true); showReply(true); whenLoaded(talk.reply, () => talk.reply.webContents.send('talk-memory')); } },
-      { type: 'separator' },
-      { label: '🗣 캐릭터 말투(지침)', click: () => { showTalk(true); showReply(true); whenLoaded(talk.reply, () => talk.reply.webContents.send('talk-persona')); } },
-      { label: '🔑 Claude 계정 로그인', click: doLogin },
-      { type: 'separator' },
-      ...studyItems()
-    ] : [
-      ...studyItems(),
-      { type: 'separator' },
-      { label: '📋 클립보드 번역', click: () => clipAction('translate') },
-      { label: '📋 클립보드 다듬기', click: () => clipAction('polish') },
-      { label: '🍅 포모도로 시작/끝', click: () => handleCommand({ name: 'pomodoro.toggle' }) }
+      { label: '🔑 계정 로그인', click: doLogin },
+      ...(process.platform === 'darwin' ? [
+        { type: 'separator' },
+        { label: '🔍 Claude 창 읽기 테스트', click: () => studyTest() },
+        { label: '📄 같이 공부 기록', click: () => shell.openPath(path.join(app.getPath('userData'), 'study.log')) }
+      ] : [])
     ]
   };
 }
+
+// 말투·기억 편집은 말 걸기 창의 패널로 (Claude 모드가 꺼져 있어도 열 수 있게 잠깐 우회)
+function openPanel(channel) {
+  const was = agentConf.enabled;
+  agentConf.enabled = true;
+  showTalk(true); showReply(true);
+  agentConf.enabled = was;
+  whenLoaded(talk.reply, () => talk.reply.webContents.send(channel));
+}
+
+// 설정 창의 Claude 칸
+ipcMain.handle('claude-settings-get', () => ({
+  claude: claudeOn(), study: !!agentConf.study, mac: process.platform === 'darwin',
+  model: agentConf.model, models: MODELS, usage: usageText(), build: currentBuild(),
+  keys: [
+    [KEY(TALK_SHORTCUT), '말 걸기 (캐릭터 더블클릭도 돼요)'],
+    [KEY(CLIP_KEYS.translate), '복사한 글 번역 → 클립보드'],
+    [KEY(CLIP_KEYS.polish), '복사한 글 다듬기 → 클립보드'],
+    [KEY(SCREEN_KEY), '화면 보고 도와줘'],
+    ['Ctrl + 휠', '캐릭터 크기 (캐릭터 위에서, 트랙패드는 핀치)']
+  ]
+}));
+ipcMain.handle('claude-settings', async (event, { action, value }) => {
+  switch (action) {
+    case 'mode': setClaudeMode(!!value); break;
+    case 'study': setStudy(!!value); break;
+    case 'model': if (MODELS.some(([id]) => id === value)) setModel(value); break;
+    case 'persona': openPanel('talk-persona'); break;
+    case 'memory': openPanel('talk-memory'); break;
+    case 'login': doLogin(); break;
+    case 'update': checkForUpdate({ manual: true, ...updateOpts() }); break;
+    case 'credits': openCredits(); break;
+    case 'data': shell.openPath(app.getPath('userData')); break;
+  }
+  return true;
+});
 
 ipcMain.handle('agent-send', async (event, text) => {
   const t = String(text || '').trim();
@@ -1365,6 +1375,7 @@ const POMO_LINES = {
 const fmt = (sec) => `${String(Math.floor(sec / 60)).padStart(2, '0')}:${String(sec % 60).padStart(2, '0')}`;
 const pomodoro = createPomodoro({
   onPhase: (phase, s) => {
+    refreshTrayMenu();
     const text = (POMO_LINES[phase] || (() => ''))(s);
     if (text) primaryMascot()?.win.webContents.send('agent-event', { type: 'pomodoro', phase, text });
     if (['work', 'break', 'long', 'done'].includes(phase) && Notification.isSupported()) new Notification({ title: '🍅 포모도로', body: text, silent: false }).show();
