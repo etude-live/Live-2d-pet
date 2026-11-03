@@ -88,6 +88,7 @@ function createClaudeWatch({ app, generate, getPersona, getMemory, onSay, onStat
     } catch { /* 무시 */ }
   }
   let on = false, timer = null, busy = false;
+  let seenQ = new Set(), fresh = false;
   let curQ = '', grew = false, lastA = '', saidQ = '', sawTools = false;
   let lastKey = '', stableKey = '', stableCount = 0, lastSaidKey = '', lastAt = 0, lastLine = '', firstSeen = true;
 
@@ -104,7 +105,13 @@ function createClaudeWatch({ app, generate, getPersona, getMemory, onSay, onStat
       const key = crypto.createHash('sha1').update(body).digest('hex');
       // 같은 질문에서 답이 늘어나는 걸 직접 봤을 때만 거든다 (대화·창을 바꿔서 글이 바뀐 건 무시)
       if (ex.method !== 'tail') {
-        if (ex.q !== curQ) { curQ = ex.q; grew = false; lastA = ex.a; sawTools = false; }
+        if (ex.q !== curQ) {
+          // 새로 보낸 질문은 답이 거의 없는 상태로 처음 보인다. 스크롤로 다시 나타난 옛 질문은 답이 이미 길다
+          curQ = ex.q; lastA = ex.a; sawTools = false; grew = false;
+          fresh = ex.a.length < 150 && !seenQ.has(ex.q);
+          seenQ.add(ex.q);
+          if (seenQ.size > 500) seenQ = new Set([...seenQ].slice(-200));
+        }
         if (TOOLISH.test(ex.a)) sawTools = true;
         else if (ex.a !== lastA) { if (ex.a.length > lastA.length) grew = true; lastA = ex.a; }
       }
@@ -116,7 +123,7 @@ function createClaudeWatch({ app, generate, getPersona, getMemory, onSay, onStat
       if (firstSeen) { firstSeen = false; lastSaidKey = key; log(`${info} 켤 때 있던 대화라 건너뜀`); return; }
       if (key === lastSaidKey) return;
       if (ex.method !== 'tail' && ex.q === saidQ) { log(`${info} 이 질문엔 이미 거듦`); lastSaidKey = key; return; }   // 질문 하나에 한 번만
-      if (ex.method !== 'tail' && !grew) { log(`${info} 다른 대화로 옮긴 것 같아 건너뜀`); lastSaidKey = key; return; }
+      if (ex.method !== 'tail' && (!grew || !fresh)) { log(`${info} 새 질문이 아님 (스크롤·대화 전환) 건너뜀`); lastSaidKey = key; return; }
       if (Date.now() - lastAt < MIN_GAP) { log(`${info} 방금 말해서 쉼`); return; }
       lastSaidKey = key; lastAt = Date.now(); saidQ = ex.q;
       log(`${info} 거들기 요청 (질문: ${ex.q.slice(0, 40).replace(/\n/g, ' ')})`);
