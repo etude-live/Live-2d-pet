@@ -259,6 +259,7 @@ async function loadModel(model, { announce = true, auto = false } = {}) {
   applyMotions();
   manualExp = null;
   ipcRenderer.send('expressions', mascot.listExpressions());   // 메뉴·스트림덱의 표정 버튼용
+  if (announce) playMotion('hello');
   if (announce) say(AGENT.TEXT.hello, 5800, { auto, tts: false, lip: true });   // DeepSeek짱 인사
   return true;
 }
@@ -456,8 +457,23 @@ window.addEventListener('resize', layout);
 // ===== モーション =====
 const pick = (arr) => (arr.length ? arr[Math.floor(Math.random() * arr.length)] : null);
 
-function playMotion() {
-  mascot.playMotion(pick(mascot.listMotions()));
+// 상황에 맞는 동작 (동작 파일 이름으로 찾음: 즌다몬의 mtnBody_think 등). 없으면 아무 동작
+const MOTION_HINTS = {
+  thinking: /think|wonder|hmm|考/i,
+  approval: /point|surpris|tremble|焦/i,
+  done: /laugh|yes|happy|joy|smile|nod|笑/i,
+  error: /no\d*\.|tremble|sad|cry|泣/i,
+  blush: /shy|blush|照/i,
+  smug: /laugh|point/i,
+  hello: /wave|hello|greet/i
+};
+function playMotion(hint) {
+  const all = mascot.listMotions();
+  const re = hint && MOTION_HINTS[hint];
+  const fit = re ? all.filter((m) => re.test(m.file || '')) : [];
+  // 의미 있는 동작이 있는 모델이면, 아무 때나 할 땐 무난한 것만 (no·떨기·화남 빼고)
+  const calm = all.filter((m) => !/no\d*\.|tremble|angry|sad/i.test(m.file || ''));
+  mascot.playMotion(pick(fit.length ? fit : calm.length ? calm : all));
 }
 
 // ===== 吹き出し・読み上げ =====
@@ -584,7 +600,7 @@ async function idleMutter(auto = true) {
     const raw = await ipcRenderer.invoke('mutter-next');
     if (!raw) return;
     const line = AGENT.parseLine(raw);
-    playMotion();
+    playMotion(line.faces[0]);
     const face = line.faces.find((f) => agentExpression(f));
     if (face) agentFace(face, 4000);
     say(line.text, Math.min(6000, Math.max(3500, 1500 + line.text.length * 90)), { tts: false, auto, lip: true });
@@ -808,7 +824,7 @@ const EXP_HINTS = {
   done: [/heart|love|happy|joy|smile|glad|하트|기쁨|웃|笑|喜/i],
   error: [/tear|cry|sad|sorrow|눈물|슬픔|泣|悲/i, /dizzy|angry|어지|怒/i],
   blush: [/blush|shy|embarrass|홍조|부끄|照|赤|脸红/i],
-  smug: [/smug|grin|tease|얄미|ドヤ|得意/i]
+  smug: [/smug|grin|tease|얄미|ドヤ|得意/i, /laugh/i]
 };
 const VRM_EXP = { thinking: 'relaxed', approval: 'surprised', done: 'happy', error: 'sad', blush: 'happy', smug: 'relaxed' };
 
@@ -870,7 +886,7 @@ function clickReact() {
   const recent = clickTimes.filter((t) => now - t < 3000).length;
   const line = AGENT.parseLine(recent >= 6 ? pick(AGENT.CLICK_SPAM) : clickTimes.length >= 5 ? pick(AGENT.CLICK_MANY) : pick(AGENT.CLICK));
   if (recent >= 6 || clickTimes.length >= 5) clickTimes = [];
-  playMotion();
+  playMotion(line.faces[0]);
   const face = line.faces.find((f) => agentExpression(f));
   if (face) agentFace(face, 3500);
   if (!talkVisible) say(line.text, 3500, { tts: false, lip: true });   // 말 걸기 창이 떠 있으면 표정·몸짓만
@@ -889,7 +905,7 @@ function onAgentEvent(e) {
     case 'start':
       agentUi.running = true; agentUi.ask = null;
       agentFace('thinking');
-      playMotion();
+      playMotion('thinking');
       agentSay(AGENT.TEXT.start, 2500);
       break;
     case 'thought':   // 추론 혼잣말은 말 걸기 창과 겹쳐서 뺐다. 가끔 몸짓만
@@ -899,7 +915,7 @@ function onAgentEvent(e) {
     case 'permission': {
       agentUi.ask = e;
       agentFace('approval');
-      playMotion();
+      playMotion('approval');
       // 자세한 내용과 버튼은 말 걸기 창에. 여기선 짧게
       agentSay(e.talkOpen === false ? AGENT.askLine(e.tool) : AGENT.TEXT.approval, 55000);
       break;
@@ -912,7 +928,7 @@ function onAgentEvent(e) {
       break;
     case 'done': {
       agentFace('done', 4000);
-      playMotion();
+      playMotion('done');
       // 말 걸기 창이 열려 있으면 답은 거기 있으니 짧게
       const summary = e.talkOpen ? '' : AGENT.answerLine(e.result, 60);
       agentSay(summary ? `${AGENT.TEXT.done}\n${summary}` : AGENT.TEXT.done, 4000);
@@ -921,20 +937,20 @@ function onAgentEvent(e) {
     case 'error':
       if (e.stopped) { agentFace(null); agentSay(AGENT.TEXT.stopped, 2500); break; }
       agentFace('error', 5000);
-      playMotion();
+      playMotion('error');
       agentSay(AGENT.TEXT.error, 5000);
       break;
-    case 'clipDone': agentFace('done', 2500); playMotion(); break;
+    case 'clipDone': agentFace('done', 2500); playMotion('done'); break;
     case 'pomodoro':   // 포모도로 단계 바뀜
       agentUi.quiet = false;
       if (e.phase === 'break' || e.phase === 'long' || e.phase === 'done') agentFace('done', 4000);
-      playMotion();
+      playMotion('done');
       agentSay('🍅 ' + e.text, 6000);
       break;
     case 'reminder':   // 알림은 말 걸기 창이 열려 있어도 직접 말함
       agentUi.quiet = false;
       agentFace('done', 5000);
-      playMotion();
+      playMotion('done');
       agentSay('⏰ ' + e.text, 15000);
       break;
     case 'study': {   // 같이 공부: Claude 앱의 답을 보고 한마디
@@ -942,7 +958,7 @@ function onAgentEvent(e) {
       const line = AGENT.parseLine(e.text);
       const face = line.faces.find((f) => agentExpression(f));
       if (face) agentFace(face, 5000);
-      playMotion();
+      playMotion(line.faces[0]);
       say(line.text, Math.min(9000, Math.max(4500, 1500 + line.text.length * 110)), { tts: false, lip: true });
       break;
     }
