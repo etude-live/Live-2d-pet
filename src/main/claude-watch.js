@@ -27,6 +27,8 @@ function readWindow(app, { prompt = false } = {}) {
 
 // 답 끝에 이런 말이 있으면 Claude 가 아직 일하는 중 (도구 실행·생각)
 const BUSY = /(실행 중|생각 중|작업 중|검색 중|읽는 중|Running|Thinking|Searching|Working|Reading)[.…\s]*$/i;
+// 답에 이런 게 보이면 도구를 쓰는 작업 (중간에 오래 멈출 수 있음)
+const TOOLISH = /실행 중|명령어|Running|Ran |Read |Edit |Bash|도구|tool use|검색 중|Searched|Searching/i;
 const IS_USER = /user-message|font-user|human-turn|user-turn/i;
 const IS_AI = /claude-response|font-claude|claude-message|assistant-message|ai-turn/i;
 
@@ -86,7 +88,7 @@ function createClaudeWatch({ app, generate, getPersona, getMemory, onSay, onStat
     } catch { /* 무시 */ }
   }
   let on = false, timer = null, busy = false;
-  let curQ = '', grew = false, lastA = '', saidQ = '';
+  let curQ = '', grew = false, lastA = '', saidQ = '', sawTools = false;
   let lastKey = '', stableKey = '', stableCount = 0, lastSaidKey = '', lastAt = 0, lastLine = '', firstSeen = true;
 
   async function poll() {
@@ -102,12 +104,14 @@ function createClaudeWatch({ app, generate, getPersona, getMemory, onSay, onStat
       const key = crypto.createHash('sha1').update(body).digest('hex');
       // 같은 질문에서 답이 늘어나는 걸 직접 봤을 때만 거든다 (대화·창을 바꿔서 글이 바뀐 건 무시)
       if (ex.method !== 'tail') {
-        if (ex.q !== curQ) { curQ = ex.q; grew = false; lastA = ex.a; }
+        if (ex.q !== curQ) { curQ = ex.q; grew = false; lastA = ex.a; sawTools = false; }
+        if (TOOLISH.test(ex.a)) sawTools = true;
         else if (ex.a !== lastA) { if (ex.a.length > lastA.length) grew = true; lastA = ex.a; }
       }
       // 글이 안 바뀐 채로 두 번 = 답이 다 나옴
       if (key !== stableKey) { stableKey = key; stableCount = 0; log(`${info} 글이 바뀌는 중`); return; }
-      if (++stableCount < 3) return;   // 15초 넘게 그대로일 때만 (도구 실행 중 잠깐 멈춘 것과 구분)
+      // 그냥 대화면 5초, 도구를 쓰는 작업(코딩 등)이면 15초 조용해야 끝난 걸로 (도구 실행 중 잠깐 멈춘 것과 구분)
+      if (++stableCount < (sawTools ? 3 : 1)) return;
       if (ex.method !== 'tail' && BUSY.test(ex.a.slice(-80))) { log(`${info} 아직 실행 중 (끝: ${ex.a.slice(-30).replace(/\n/g, ' ')})`); return; }
       if (firstSeen) { firstSeen = false; lastSaidKey = key; log(`${info} 켤 때 있던 대화라 건너뜀`); return; }
       if (key === lastSaidKey) return;
