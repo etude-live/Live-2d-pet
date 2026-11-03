@@ -103,6 +103,8 @@ function createClaudeWatch({ app, generate, getPersona, getMemory, onSay, onStat
       const info = `[${ex.method} 블록${ex.blocks} 질문${ex.q.length}자 답${ex.a.length}자 노드${r.nodes.length}]`;
       if (!body.trim() || (ex.method !== 'tail' && ex.a.length < 10)) { log(`${info} 답이 아직 없음`); return; }
       const key = crypto.createHash('sha1').update(body).digest('hex');
+      // 켠 직후 처음 읽은 대화는 "이미 있던 것"으로만 표시 (기다리지 않음 — 바로 새 질문을 해도 거들 수 있게)
+      if (firstSeen) { firstSeen = false; saidQ = ex.q; seenQ.add(ex.q); curQ = ex.q; lastA = ex.a; stableKey = key; log(`${info} 켤 때 있던 대화 (건너뜀)`); return; }
       // 같은 질문에서 답이 늘어나는 걸 직접 봤을 때만 거든다 (대화·창을 바꿔서 글이 바뀐 건 무시)
       if (ex.method !== 'tail') {
         if (ex.q !== curQ) {
@@ -120,7 +122,6 @@ function createClaudeWatch({ app, generate, getPersona, getMemory, onSay, onStat
       // 그냥 대화면 5초, 도구를 쓰는 작업(코딩 등)이면 15초 조용해야 끝난 걸로 (도구 실행 중 잠깐 멈춘 것과 구분)
       if (++stableCount < (sawTools ? 3 : 1)) return;
       if (ex.method !== 'tail' && BUSY.test(ex.a.slice(-80))) { log(`${info} 아직 실행 중 (끝: ${ex.a.slice(-30).replace(/\n/g, ' ')})`); return; }
-      if (firstSeen) { firstSeen = false; lastSaidKey = key; log(`${info} 켤 때 있던 대화라 건너뜀`); return; }
       if (key === lastSaidKey) return;
       if (ex.method !== 'tail' && ex.q === saidQ) { log(`${info} 이 질문엔 이미 거듦`); lastSaidKey = key; return; }   // 질문 하나에 한 번만
       if (ex.method !== 'tail' && (!grew || !fresh)) { log(`${info} 새 질문이 아님 (스크롤·대화 전환) 건너뜀`); lastSaidKey = key; return; }
