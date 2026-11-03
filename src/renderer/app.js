@@ -193,6 +193,7 @@ function resolveModelPath(model) {
 async function importModel(p) {
   const res = await ipcRenderer.invoke('import-model', p);
   if (!res) return;
+  if (!res.error) say('모델 가져왔어요! 불러오는 중…', 3000, { tts: false });
   if (res.error) { say('가져오지 못했어…\n' + res.error, 5000, { tts: false }); return; }
   if (res.motions !== undefined) { await onMotionsImported(res.motions); return; } // モーションパック
   await refreshLibrary();

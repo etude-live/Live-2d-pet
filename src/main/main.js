@@ -542,7 +542,9 @@ ipcMain.handle('select-model', async (event) => {
 // ライブラリへ取り込み（ZIP / .vrm / フォルダ）。p 省略時はダイアログ
 ipcMain.handle('import-model', async (event, p) => {
   if (!p) {
-    const result = await dialog.showOpenDialog(BrowserWindow.fromWebContents(event.sender), {
+    // 투명한 캐릭터 창에 붙이면 Mac 에서 창이 안 보이거나 눌리지 않을 수 있어 따로 띄운다
+    app.focus({ steal: true });
+    const result = await dialog.showOpenDialog({
       title: `모델 가져오기(${importLabel})`,
       filters: [{ name: importLabel, extensions: importExtensions }],
       properties: ['openFile']
