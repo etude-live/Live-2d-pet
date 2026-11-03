@@ -30,6 +30,21 @@ const BUSY = /(실행 중|생각 중|작업 중|검색 중|읽는 중|Running|Th
 const IS_USER = /user-message|font-user|human-turn|user-turn/i;
 const IS_AI = /claude-response|font-claude|claude-message|assistant-message|ai-turn/i;
 
+// 입력칸(ProseMirror 등) 안의 글은 빼고 모은다 — 프롬프트를 치는 동안 답이 바뀐 걸로 보지 않게
+const IS_INPUT = /ProseMirror|contenteditable|chat-input|composer|prompt-input/i;
+function textsAfter(nodes, from) {
+  const out = [];
+  let skipDepth = -1;
+  for (let k = from; k < nodes.length; k++) {
+    const n = nodes[k];
+    if (skipDepth >= 0 && n.d > skipDepth) continue;
+    skipDepth = -1;
+    if (n.r === 'AXTextArea' || n.r === 'AXTextField' || IS_INPUT.test(`${n.c || ''} ${n.i || ''}`)) { skipDepth = n.d; continue; }
+    if (n.t) out.push(n.t);
+  }
+  return out;
+}
+
 // 노드 목록 → 마지막 질문/답. DOM class 로 나누고, 안 되면 끝부분 글 전체 (Haiku 가 알아서 나눔)
 function extract(nodes = []) {
   const blocks = [];
@@ -49,7 +64,7 @@ function extract(nodes = []) {
   if (lastQ >= 0) {
     const q = blocks[lastQ].text;
     // 답: 마지막 질문 뒤의 글 전부 (입력칸 글은 뺌). 답 칸 표시는 화면마다 달라서 (도구 실행 줄·본문이 따로 나뉨) 믿지 않는다
-    const a = nodes.slice(blocks[lastQ].end).filter((n) => n.t && n.r !== 'AXTextArea' && n.r !== 'AXTextField').map((n) => n.t).join('\n').trim();
+    const a = textsAfter(nodes, blocks[lastQ].end).join('\n').trim();
     const method = 'class';
     return { method, q, a, blocks: blocks.length, aiCls: [...new Set(blocks.filter((b) => b.kind === 'a').map((b) => b.cls))].join('|') };
   }
@@ -71,6 +86,7 @@ function createClaudeWatch({ app, generate, getPersona, getMemory, onSay, onStat
     } catch { /* 무시 */ }
   }
   let on = false, timer = null, busy = false;
+  let curQ = '', grew = false, lastA = '';
   let lastKey = '', stableKey = '', stableCount = 0, lastSaidKey = '', lastAt = 0, lastLine = '', firstSeen = true;
 
   async function poll() {
@@ -84,12 +100,18 @@ function createClaudeWatch({ app, generate, getPersona, getMemory, onSay, onStat
       const info = `[${ex.method} 블록${ex.blocks} 질문${ex.q.length}자 답${ex.a.length}자 노드${r.nodes.length}]`;
       if (!body.trim() || (ex.method !== 'tail' && ex.a.length < 10)) { log(`${info} 답이 아직 없음`); return; }
       const key = crypto.createHash('sha1').update(body).digest('hex');
+      // 같은 질문에서 답이 늘어나는 걸 직접 봤을 때만 거든다 (대화·창을 바꿔서 글이 바뀐 건 무시)
+      if (ex.method !== 'tail') {
+        if (ex.q !== curQ) { curQ = ex.q; grew = false; lastA = ex.a; }
+        else if (ex.a !== lastA) { if (ex.a.length > lastA.length) grew = true; lastA = ex.a; }
+      }
       // 글이 안 바뀐 채로 두 번 = 답이 다 나옴
       if (key !== stableKey) { stableKey = key; stableCount = 0; log(`${info} 글이 바뀌는 중`); return; }
       if (++stableCount < 2) return;   // 10초 넘게 그대로일 때만 (도구 실행 중 멈춰 있는 것과 구분)
       if (ex.method !== 'tail' && BUSY.test(ex.a.slice(-80))) { log(`${info} 아직 실행 중 (끝: ${ex.a.slice(-30).replace(/\n/g, ' ')})`); return; }
       if (firstSeen) { firstSeen = false; lastSaidKey = key; log(`${info} 켤 때 있던 대화라 건너뜀`); return; }
       if (key === lastSaidKey) return;
+      if (ex.method !== 'tail' && !grew) { log(`${info} 다른 대화로 옮긴 것 같아 건너뜀`); lastSaidKey = key; return; }
       if (Date.now() - lastAt < MIN_GAP) { log(`${info} 방금 말해서 쉼`); return; }
       lastSaidKey = key; lastAt = Date.now();
       log(`${info} 거들기 요청 (질문: ${ex.q.slice(0, 40).replace(/\n/g, ' ')})`);
