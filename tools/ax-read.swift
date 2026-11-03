@@ -36,30 +36,21 @@ let already = (attr(appEl, "AXManualAccessibility") as? Bool) ?? false
 AXUIElementSetAttributeValue(appEl, "AXManualAccessibility" as CFString, kCFBooleanTrue)
 if !already { Thread.sleep(forTimeInterval: 0.8) }
 
-// 가장 큰 창 (대화 창). 메뉴 막대 같은 작은 창은 건너뜀
-func area(_ w: AXUIElement) -> Double {
-  var size = CGSize.zero
-  if let v = attr(w, kAXSizeAttribute as String) { AXValueGetValue(v as! AXValue, .cgSize, &size) }
-  return Double(size.width * size.height)
-}
-var window: AXUIElement? = nil
-if let ws = attr(appEl, kAXWindowsAttribute as String) as? [AXUIElement], !ws.isEmpty { window = ws.max(by: { area($0) < area($1) }) }
-if window == nil, let w = attr(appEl, kAXFocusedWindowAttribute as String) { window = (w as! AXUIElement) }
-guard let win = window else { out(["ok": false, "error": "no-window"]) ; exit(0) }
-
-var nodes: [[String: Any]] = []
+// 창이 여러 개일 수 있음 (빠른 입력 창·숨은 창 등). 모든 창을 읽어서 글이 가장 많은 창을 고른다.
+// 웹 내용 트리는 처음 켤 때 늦게 만들어지므로, 글이 거의 없으면 잠깐 기다렸다 다시 읽는다.
 let maxNodes = 30000
-func walk(_ el: AXUIElement, _ depth: Int) {
-  if nodes.count >= maxNodes || depth > 120 { return }
+func walk(_ el: AXUIElement, _ depth: Int, _ nodes: inout [[String: Any]]) {
+  if nodes.count >= maxNodes || depth > 150 { return }
   let role = (attr(el, kAXRoleAttribute as String) as? String) ?? ""
   var text = ""
   if role == "AXStaticText" || role == "AXHeading" || role == "AXTextArea" || role == "AXTextField" {
     text = (attr(el, kAXValueAttribute as String) as? String) ?? ""
   }
   if text.isEmpty, role == "AXStaticText" { text = (attr(el, kAXTitleAttribute as String) as? String) ?? "" }
+  if text.isEmpty, role == "AXStaticText" { text = (attr(el, kAXDescriptionAttribute as String) as? String) ?? "" }
   let cls = ((attr(el, "AXDOMClassList") as? [String]) ?? []).joined(separator: " ")
   let tid = (attr(el, "AXDOMIdentifier") as? String) ?? ""
-  if !text.isEmpty || !cls.isEmpty || !tid.isEmpty {
+  if !text.isEmpty || !cls.isEmpty || !tid.isEmpty || role == "AXWebArea" {
     var n: [String: Any] = ["d": depth, "r": role]
     if !cls.isEmpty { n["c"] = cls }
     if !tid.isEmpty { n["i"] = tid }
@@ -67,9 +58,30 @@ func walk(_ el: AXUIElement, _ depth: Int) {
     nodes.append(n)
   }
   if let kids = attr(el, kAXChildrenAttribute as String) as? [AXUIElement] {
-    for k in kids { walk(k, depth + 1) }
+    for k in kids { walk(k, depth + 1, &nodes) }
   }
 }
-walk(win, 0)
-let title = (attr(win, kAXTitleAttribute as String) as? String) ?? ""
-out(["ok": true, "app": target.localizedName ?? appName, "bundle": target.bundleIdentifier ?? "", "title": title, "truncated": nodes.count >= maxNodes, "nodes": nodes])
+
+func readBest() -> (nodes: [[String: Any]], title: String, windows: Int) {
+  var wins = (attr(appEl, kAXWindowsAttribute as String) as? [AXUIElement]) ?? []
+  if wins.isEmpty, let w = attr(appEl, kAXFocusedWindowAttribute as String) { wins = [w as! AXUIElement] }
+  var best: [[String: Any]] = [], bestTitle = "", bestScore = -1
+  for w in wins {
+    var nodes: [[String: Any]] = []
+    walk(w, 0, &nodes)
+    let score = nodes.filter { $0["t"] != nil }.count
+    if score > bestScore { best = nodes; bestScore = score; bestTitle = (attr(w, kAXTitleAttribute as String) as? String) ?? "" }
+  }
+  return (best, bestTitle, wins.count)
+}
+
+var r = readBest()
+var tries = 0
+while r.nodes.filter({ $0["t"] != nil }).count < 3 && tries < 3 {
+  AXUIElementSetAttributeValue(appEl, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+  AXUIElementSetAttributeValue(appEl, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+  Thread.sleep(forTimeInterval: 1.0)
+  r = readBest(); tries += 1
+}
+if r.windows == 0 { out(["ok": false, "error": "no-window"]) }
+out(["ok": true, "app": target.localizedName ?? appName, "bundle": target.bundleIdentifier ?? "", "title": r.title, "windows": r.windows, "retries": tries, "truncated": r.nodes.count >= maxNodes, "nodes": r.nodes])

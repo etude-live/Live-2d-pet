@@ -18,7 +18,7 @@ function readWindow(app, { prompt = false } = {}) {
   return new Promise((resolve) => {
     const exe = helperPath(app);
     if (!exe) return resolve({ ok: false, error: 'no-helper' });
-    execFile(exe, prompt ? ['--prompt'] : [], { timeout: 10000, maxBuffer: 64 * 1024 * 1024 }, (err, stdout) => {
+    execFile(exe, prompt ? ['--prompt'] : [], { timeout: 15000, maxBuffer: 64 * 1024 * 1024 }, (err, stdout) => {
       if (err && !stdout) return resolve({ ok: false, error: err.killed ? 'timeout' : err.message });
       try { resolve(JSON.parse(stdout)); } catch { resolve({ ok: false, error: 'bad-output' }); }
     });
@@ -130,7 +130,7 @@ function createClaudeWatch({ app, generate, getPersona, getMemory, onSay, onStat
     const r = await readWindow(app, { prompt: true });
     const ex = r.ok ? extract(r.nodes) : null;
     const file = path.join(dir, 'claude-read.txt');
-    const lines = [`# ${new Date().toISOString()}  ok=${r.ok} ${r.error || ''} app=${r.app || ''} bundle=${r.bundle || ''} title=${r.title || ''} nodes=${r.nodes?.length || 0}${r.truncated ? ' (잘림)' : ''}`];
+    const lines = [`# ${new Date().toISOString()}  ok=${r.ok} ${r.error || ''} app=${r.app || ''} bundle=${r.bundle || ''} title=${r.title || ''} windows=${r.windows ?? '?'} retries=${r.retries ?? 0} nodes=${r.nodes?.length || 0}${r.truncated ? ' (잘림)' : ''}`];
     if (ex) {
       lines.push(`# 나눈 방법: ${ex.method}  블록 ${ex.blocks}개`, '', '===== 마지막 질문 =====', ex.q || '(못 찾음)', '', '===== 답 =====', ex.a || '(못 찾음)');
       if (ex.tail) lines.push('', '===== 끝부분 글 =====', ex.tail);
