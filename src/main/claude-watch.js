@@ -86,7 +86,7 @@ function createClaudeWatch({ app, generate, getPersona, getMemory, onSay, onStat
     } catch { /* 무시 */ }
   }
   let on = false, timer = null, busy = false;
-  let curQ = '', grew = false, lastA = '';
+  let curQ = '', grew = false, lastA = '', saidQ = '';
   let lastKey = '', stableKey = '', stableCount = 0, lastSaidKey = '', lastAt = 0, lastLine = '', firstSeen = true;
 
   async function poll() {
@@ -107,13 +107,14 @@ function createClaudeWatch({ app, generate, getPersona, getMemory, onSay, onStat
       }
       // 글이 안 바뀐 채로 두 번 = 답이 다 나옴
       if (key !== stableKey) { stableKey = key; stableCount = 0; log(`${info} 글이 바뀌는 중`); return; }
-      if (++stableCount < 2) return;   // 10초 넘게 그대로일 때만 (도구 실행 중 멈춰 있는 것과 구분)
+      if (++stableCount < 3) return;   // 15초 넘게 그대로일 때만 (도구 실행 중 잠깐 멈춘 것과 구분)
       if (ex.method !== 'tail' && BUSY.test(ex.a.slice(-80))) { log(`${info} 아직 실행 중 (끝: ${ex.a.slice(-30).replace(/\n/g, ' ')})`); return; }
       if (firstSeen) { firstSeen = false; lastSaidKey = key; log(`${info} 켤 때 있던 대화라 건너뜀`); return; }
       if (key === lastSaidKey) return;
+      if (ex.method !== 'tail' && ex.q === saidQ) { log(`${info} 이 질문엔 이미 거듦`); lastSaidKey = key; return; }   // 질문 하나에 한 번만
       if (ex.method !== 'tail' && !grew) { log(`${info} 다른 대화로 옮긴 것 같아 건너뜀`); lastSaidKey = key; return; }
       if (Date.now() - lastAt < MIN_GAP) { log(`${info} 방금 말해서 쉼`); return; }
-      lastSaidKey = key; lastAt = Date.now();
+      lastSaidKey = key; lastAt = Date.now(); saidQ = ex.q;
       log(`${info} 거들기 요청 (질문: ${ex.q.slice(0, 40).replace(/\n/g, ' ')})`);
       const line = await comment(ex);
       log(line ? `→ 말함: ${line}` : '→ 할 말 없음 ("-")');
