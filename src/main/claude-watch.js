@@ -48,13 +48,9 @@ function extract(nodes = []) {
   const lastQ = blocks.map((b) => b.kind).lastIndexOf('q');
   if (lastQ >= 0) {
     const q = blocks[lastQ].text;
-    let a = blocks.slice(lastQ + 1).filter((b) => b.kind === 'a').map((b) => b.text).join('\n').trim();
-    let method = 'class';
-    if (!a) {
-      // 답 칸을 class 로 못 찾음 (새 답은 표시가 다를 수 있음): 질문 뒤의 글을 전부 답으로 (입력칸 글은 뺌)
-      a = nodes.slice(blocks[lastQ].end).filter((n) => n.t && n.r !== 'AXTextArea' && n.r !== 'AXTextField').map((n) => n.t).join('\n').trim();
-      method = 'class+after';
-    }
+    // 답: 마지막 질문 뒤의 글 전부 (입력칸 글은 뺌). 답 칸 표시는 화면마다 달라서 (도구 실행 줄·본문이 따로 나뉨) 믿지 않는다
+    const a = nodes.slice(blocks[lastQ].end).filter((n) => n.t && n.r !== 'AXTextArea' && n.r !== 'AXTextField').map((n) => n.t).join('\n').trim();
+    const method = 'class';
     return { method, q, a, blocks: blocks.length, aiCls: [...new Set(blocks.filter((b) => b.kind === 'a').map((b) => b.cls))].join('|') };
   }
   const all = nodes.filter((n) => n.t).map((n) => n.t).join('\n');
