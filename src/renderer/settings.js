@@ -180,7 +180,7 @@ async function renderClaude() {
     sel.value = c.model;
   }
   $('usage').textContent = c.usage || '';
-  $('ver').textContent = `빌드 ${c.build}`;
+  $('ver').textContent = `${c.version} (빌드 ${c.build})`;
   $('keys').innerHTML = '';
   for (const [k, what] of c.keys) {
     const kb = document.createElement('kbd'); kb.textContent = k;

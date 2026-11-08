@@ -11,7 +11,10 @@ const REPO = 'etude-live/Live-2d-pet';
 const CHECK_EVERY = 3 * 60 * 60 * 1000;   // 3시간마다
 
 const pkg = require('../../package.json');
+// 사람이 보는 버전은 vX.Y.Z (package.json version, 빌드할 때 Z 를 채움).
+// 비교는 빌드 번호(릴리스 태그 build-N)로 한다 — 예전 빌드도 같은 태그로 업데이트를 찾을 수 있게.
 const currentBuild = () => Number(pkg.buildNumber) || 0;
+const currentVersion = () => `v${pkg.version}`;
 
 // 지금 실행 중인 .app 경로 (…/X.app/Contents/MacOS/X → …/X.app)
 function appBundlePath() {
@@ -28,8 +31,9 @@ async function latestRelease() {
   if (!res.ok) throw new Error(`업데이트 확인 실패 (HTTP ${res.status})`);
   const r = await res.json();
   const build = Number(String(r.tag_name || '').replace(/^build-/, '')) || 0;
+  const version = (String(r.name || '').match(/v\d+\.\d+\.\d+/) || [`빌드 ${build}`])[0];
   const asset = (r.assets || []).find((a) => a.name.endsWith(`-mac-${process.arch}.zip`));
-  return { build, asset, notes: String(r.body || r.name || '').trim(), url: r.html_url };
+  return { build, version, asset, notes: String(r.body || r.name || '').trim(), url: r.html_url };
 }
 
 const run = (cmd, args) => new Promise((resolve, reject) =>
@@ -142,14 +146,14 @@ async function checkForUpdate({ manual = false, beforeQuit, say } = {}) {
   }
   try {
     if (!rel.asset || rel.build <= currentBuild()) {
-      if (manual) dialog.showMessageBox({ message: `최신 버전이에요 (빌드 ${currentBuild()})` });
+      if (manual) dialog.showMessageBox({ message: `최신 버전이에요 (${currentVersion()})` });
       return;
     }
     const notes = rel.notes.split('\n').slice(0, 12).join('\n');
     const { response } = await dialog.showMessageBox({
       type: 'info',
       message: '새 버전이 나왔어요!',
-      detail: `빌드 ${currentBuild()} → ${rel.build}\n\n${notes}\n\n업데이트하면 내려받은 뒤 앱이 잠깐 꺼졌다가 다시 켜져요.`,
+      detail: `${currentVersion()} → ${rel.version}\n\n${notes}\n\n업데이트하면 내려받은 뒤 앱이 잠깐 꺼졌다가 다시 켜져요.`,
       buttons: ['지금 업데이트', '나중에'],
       defaultId: 0,
       cancelId: 1
@@ -176,7 +180,7 @@ function justUpdated() {
   let prev = null;
   try { prev = Number(fs.readFileSync(f, 'utf8')) || null; } catch { /* 처음 */ }
   try { fs.writeFileSync(f, String(currentBuild())); } catch { /* 무시 */ }
-  return prev && currentBuild() > prev ? { from: prev, to: currentBuild() } : null;
+  return prev && currentBuild() > prev ? { from: prev, to: currentVersion() } : null;
 }
 
 function startAutoUpdate(opts = {}) {
@@ -184,4 +188,4 @@ function startAutoUpdate(opts = {}) {
   setInterval(() => checkForUpdate(opts), CHECK_EVERY);
 }
 
-module.exports = { checkForUpdate, startAutoUpdate, currentBuild, justUpdated };
+module.exports = { checkForUpdate, startAutoUpdate, currentBuild, currentVersion, justUpdated };

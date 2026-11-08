@@ -22,6 +22,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # 버전의 PATCH 를 커밋 수로 셈
 
       - uses: actions/setup-node@v4
         with:
@@ -31,8 +33,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Stamp build number
-        run: node -e "const f='package.json',p=require('./'+f);p.buildNumber=${{ github.run_number }};require('fs').writeFileSync(f,JSON.stringify(p,null,2)+'\n')"
+      # 버전 = package.json 의 MAJOR.MINOR + PATCH(그 MAJOR.MINOR 로 바꾼 커밋 뒤의 커밋 수).
+      # 빌드 번호(run_number)는 업데이트 비교용으로 따로 둔다 (릴리스 태그 build-N).
+      - name: Stamp version and build number
+        run: |
+          BASE=$(git log -G'"version"' --format=%H -1 -- package.json)
+          PATCH=$(git rev-list --count "$BASE"..HEAD)
+          node -e "const f='package.json',p=require('./'+f);const [a,b]=p.version.split('.');p.version=a+'.'+b+'.'+$PATCH;p.buildNumber=${{ github.run_number }};require('fs').writeFileSync(f,JSON.stringify(p,null,2)+'\n');console.log('v'+p.version,'build',p.buildNumber)"
 
       - name: Download Live2D Cubism Core (5.x)
         run: |
@@ -94,7 +101,8 @@ jobs:
         run: |
           N=${{ github.run_number }}
           git log -1 --format='%s%n%n%b' | grep -v -E '^(Co-Authored-By|Claude-Session):' > notes.txt
-          gh release create "build-$N" dist/*.zip --title "빌드 $N" --notes-file notes.txt --target "$GITHUB_SHA" --latest
+          V=$(node -p "require('./package.json').version")
+          gh release create "build-$N" dist/*.zip --title "v$V (빌드 $N)" --notes-file notes.txt --target "$GITHUB_SHA" --latest
 
       - uses: actions/upload-artifact@v4
         with:

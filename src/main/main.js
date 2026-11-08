@@ -9,7 +9,7 @@ const { loadConfig } = require('./config');
 const { startBridge } = require('./bridge');
 const { createStore } = require('./characters');
 const { createAgent, login } = require('./agent');
-const { checkForUpdate, startAutoUpdate, currentBuild, justUpdated } = require('./updater');
+const { checkForUpdate, startAutoUpdate, currentBuild, currentVersion, justUpdated } = require('./updater');
 const { createMemory } = require('./memory');
 const { createMutter } = require('./mutter');
 const { createClaudeWatch } = require('./claude-watch');
@@ -76,7 +76,7 @@ if (!app.requestSingleInstanceLock()) {
     startTalk();
     startAutoUpdate(updateOpts());
     const upd = justUpdated();
-    if (upd) setTimeout(() => mascotSay(`빌드 ${upd.to}으로 업데이트됐어요!`), 3500);
+    if (upd) setTimeout(() => mascotSay(`${upd.to}(으)로 업데이트됐어요!`), 3500);
     setTimeout(checkPermissions, upd ? 6000 : 3000);
   });
 }
@@ -1197,7 +1197,7 @@ function openPanel(channel) {
 // 설정 창의 Claude 칸
 ipcMain.handle('claude-settings-get', () => ({
   claude: claudeOn(), study: !!agentConf.study, mac: process.platform === 'darwin',
-  model: agentConf.model, models: MODELS, usage: usageText(), build: currentBuild(),
+  model: agentConf.model, models: MODELS, usage: usageText(), build: currentBuild(), version: currentVersion(),
   keys: [
     [KEY(TALK_SHORTCUT), '말 걸기 (캐릭터 더블클릭도 돼요)'],
     [KEY(CLIP_KEYS.translate), '복사한 글 번역 → 클립보드'],
@@ -1425,7 +1425,7 @@ async function handleCommand(payload = {}, client) {
       case 'pomodoro.skip': result = { ok: true, state: pomodoro.skip() }; break;
       case 'reminder.list': result = { ok: true, reminders: reminders.list().map((r) => ({ id: r.id, text: r.text, at: r.at, daily: r.daily })) }; break;
       case 'mascot.say': primaryMascot()?.win.webContents.send('bridge-event', { type: 'say', payload: { text: String(args.text || '') } }); result = { ok: true }; break;
-      case 'state.get': result = { ok: true, claude: claudeOn(), agent: agent.busy ? 'working' : 'idle', pomodoro: pomodoro.state(), usage, build: currentBuild() }; break;
+      case 'state.get': result = { ok: true, claude: claudeOn(), agent: agent.busy ? 'working' : 'idle', pomodoro: pomodoro.state(), usage, version: currentVersion(), build: currentBuild() }; break;
       case 'usage.get': await agent.refreshUsage(); result = { ok: true, usage }; break;
       default: result = { ok: false, error: 'unknown-command' };
     }
