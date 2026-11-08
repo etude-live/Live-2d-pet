@@ -1,0 +1,87 @@
+# 스트림덱 플러그인(.streamDeckPlugin)을 만들어 릴리스(태그 streamdeck-N)에 올린다.
+# 앱 빌드(build-mac.yml)와는 따로 돈다: streamdeck-plugin/** 가 바뀔 때만.
+#
+# - 릴리스는 "Latest" 로 표시하지 않는다 (--latest=false).
+#   앱의 자동 업데이트가 releases/latest(= build-N)를 보기 때문에, 플러그인 릴리스가 그 자리를 뺏으면 안 된다.
+# - 사용자는 릴리스의 .streamDeckPlugin 파일을 받아 더블클릭하면 설치된다.
+name: Build Stream Deck plugin
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/stoic-davinci-mocgrx, main]
+    paths: ['streamdeck-plugin/**', '.github/workflows/streamdeck-plugin.yml']
+  pull_request:
+    paths: ['streamdeck-plugin/**', '.github/workflows/streamdeck-plugin.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  plugin:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: streamdeck-plugin
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: streamdeck-plugin/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Version (MAJOR.MINOR from package.json, PATCH = run number)
+        run: echo "VERSION=$(node scripts/sync-version.mjs ${{ github.run_number }})" >> "$GITHUB_ENV"
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Unit tests (mock app + real src/main/bridge.js)
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: End-to-end smoke test (built plugin ↔ fake Stream Deck ↔ mock app)
+        run: npm run e2e
+
+      # 설정 화면용 라이브러리를 플러그인 안에 넣는다. 실패해도 설정 화면은 인터넷에서 불러오므로 계속 진행.
+      - name: Bundle sdpi-components
+        run: npm run sdpi || echo "::warning::sdpi-components 를 받지 못했어요. 설정 화면이 인터넷에서 불러옵니다."
+
+      - name: Validate and pack
+        run: |
+          npx streamdeck validate com.etude.mascot.sdPlugin
+          npm run pack
+          mv dist/com.etude.mascot.streamDeckPlugin "dist/Live2D-Mascot-StreamDeck-$VERSION.streamDeckPlugin"
+          ls -l dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: streamdeck-plugin
+          path: streamdeck-plugin/dist/*.streamDeckPlugin
+          retention-days: 14
+
+      - name: Publish release (streamdeck-N, not "Latest")
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          N=${{ github.run_number }}
+          {
+            echo "스트림덱 플러그인 v$VERSION"
+            echo
+            echo "**설치:** 아래 \`.streamDeckPlugin\` 파일을 받아 더블클릭하세요. 앱(Live2D Desktop Mascot) 2.0.0 이상이 필요해요."
+            echo "설명서: https://github.com/${{ github.repository }}/blob/$GITHUB_SHA/streamdeck-plugin/README.md"
+            echo
+            git log -1 --format='%s%n%n%b' | grep -v -E '^(Co-Authored-By|Claude-Session):'
+          } > notes.md
+          gh release create "streamdeck-$N" dist/*.streamDeckPlugin \
+            --title "스트림덱 플러그인 v$VERSION" --notes-file notes.md \
+            --target "$GITHUB_SHA" --latest=false

@@ -1,0 +1,6 @@
+node_modules/
+dist/
+com.etude.mascot.sdPlugin/bin/
+com.etude.mascot.sdPlugin/logs/
+com.etude.mascot.sdPlugin/ui/sdpi-components.js
+*.streamDeckPlugin

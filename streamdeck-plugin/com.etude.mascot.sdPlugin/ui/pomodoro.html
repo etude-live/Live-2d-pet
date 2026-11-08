@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="ko">
+	<head>
+		<meta charset="utf-8" />
+		<title>포모도로 설정</title>
+		<!-- sdpi-components: 빌드 때 받아 둔 파일, 없으면 인터넷에서 -->
+		<script src="sdpi-components.js"></script>
+		<script>
+			if (!window.customElements || !customElements.get("sdpi-item"))
+				document.write("<script src=\"https://sdpi-components.dev/releases/v4/sdpi-components.js\"><\/script>");
+		</script>
+		<link rel="stylesheet" href="pi.css" />
+	</head>
+	<body>
+		<p class="help">누르면 <b>시작/끝</b>, 0.5초 이상 <b>길게 누르면 일시정지/다시</b>.<br />집중은 빨강, 휴식은 초록, 일시정지는 회색으로 보여요.</p>
+		<sdpi-item label="집중 (분)">
+			<sdpi-select setting="work" default="25" value-type="number">
+				<option value="15">15</option><option value="20">20</option><option value="25">25</option><option value="30">30</option>
+				<option value="40">40</option><option value="45">45</option><option value="50">50</option><option value="60">60</option><option value="90">90</option>
+			</sdpi-select>
+		</sdpi-item>
+		<sdpi-item label="휴식 (분)">
+			<sdpi-select setting="break" default="5" value-type="number">
+				<option value="3">3</option><option value="5">5</option><option value="10">10</option><option value="15">15</option>
+			</sdpi-select>
+		</sdpi-item>
+		<sdpi-item label="긴 휴식 (분)">
+			<sdpi-select setting="long" default="15" value-type="number">
+				<option value="10">10</option><option value="15">15</option><option value="20">20</option><option value="30">30</option>
+			</sdpi-select>
+		</sdpi-item>
+		<sdpi-item label="반복 횟수">
+			<sdpi-select setting="cycles" default="4" value-type="number">
+				<option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option><option value="6">6</option><option value="8">8</option>
+			</sdpi-select>
+		</sdpi-item>
+		<p class="help">바꾼 시간은 다음에 <b>새로 시작할 때</b>부터 적용돼요.</p>
+	</body>
+</html>

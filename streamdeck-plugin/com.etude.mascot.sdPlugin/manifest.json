@@ -1,0 +1,271 @@
+{
+	"$schema": "https://schemas.elgato.com/streamdeck/plugins/manifest.json",
+	"Name": "Live2D 마스코트",
+	"Version": "1.0.0.0",
+	"Author": "etude-live",
+	"Description": "데스크톱 Live2D 마스코트 앱을 스트림덱 버튼으로 — 포모도로, 말 걸기, 번역, 화면 질문, 표정, 사용량.",
+	"URL": "https://github.com/etude-live/Live-2d-pet",
+	"Category": "Live2D 마스코트",
+	"CategoryIcon": "imgs/plugin/category",
+	"Icon": "imgs/plugin/icon",
+	"CodePath": "bin/plugin.js",
+	"SDKVersion": 2,
+	"Software": {
+		"MinimumVersion": "6.5"
+	},
+	"OS": [
+		{
+			"Platform": "mac",
+			"MinimumVersion": "12"
+		},
+		{
+			"Platform": "windows",
+			"MinimumVersion": "10"
+		}
+	],
+	"Nodejs": {
+		"Version": "20",
+		"Debug": "enabled"
+	},
+	"UUID": "com.etude.mascot",
+	"Actions": [
+		{
+			"Name": "🍅 포모도로",
+			"UUID": "com.etude.mascot.pomodoro",
+			"Icon": "imgs/actions/pomodoro/icon",
+			"Tooltip": "누르면 시작/끝, 0.5초 길게 누르면 일시정지. 남은 시간을 보여 줘요.",
+			"Controllers": [
+				"Keypad"
+			],
+			"SupportedInMultiActions": false,
+			"States": [
+				{
+					"Image": "imgs/actions/pomodoro/key",
+					"TitleAlignment": "bottom",
+					"FontSize": 12,
+					"ShowTitle": true
+				}
+			],
+			"PropertyInspectorPath": "ui/pomodoro.html"
+		},
+		{
+			"Name": "⏭ 포모도로 건너뛰기",
+			"UUID": "com.etude.mascot.pomodoro-skip",
+			"Icon": "imgs/actions/pomodoro-skip/icon",
+			"Tooltip": "포모도로의 다음 단계(집중↔휴식)로 넘어가요.",
+			"Controllers": [
+				"Keypad"
+			],
+			"SupportedInMultiActions": true,
+			"States": [
+				{
+					"Image": "imgs/actions/pomodoro-skip/key",
+					"TitleAlignment": "bottom",
+					"FontSize": 12,
+					"ShowTitle": true
+				}
+			]
+		},
+		{
+			"Name": "💬 말 걸기",
+			"UUID": "com.etude.mascot.talk",
+			"Icon": "imgs/actions/talk/icon",
+			"Tooltip": "캐릭터에게 말 거는 입력칸을 열고 닫아요. 승인을 기다리면 깜빡여요.",
+			"Controllers": [
+				"Keypad"
+			],
+			"SupportedInMultiActions": true,
+			"States": [
+				{
+					"Image": "imgs/actions/talk/key",
+					"TitleAlignment": "bottom",
+					"FontSize": 12,
+					"ShowTitle": true
+				}
+			]
+		},
+		{
+			"Name": "⏹ 멈추기",
+			"UUID": "com.etude.mascot.stop",
+			"Icon": "imgs/actions/stop/icon",
+			"Tooltip": "캐릭터(Claude)가 하던 일을 멈춰요.",
+			"Controllers": [
+				"Keypad"
+			],
+			"SupportedInMultiActions": true,
+			"States": [
+				{
+					"Image": "imgs/actions/stop/key",
+					"TitleAlignment": "bottom",
+					"FontSize": 12,
+					"ShowTitle": true
+				}
+			]
+		},
+		{
+			"Name": "🆕 새 대화",
+			"UUID": "com.etude.mascot.new-chat",
+			"Icon": "imgs/actions/new-chat/icon",
+			"Tooltip": "새 대화를 시작해요. 지난 대화는 기억으로 정리돼요.",
+			"Controllers": [
+				"Keypad"
+			],
+			"SupportedInMultiActions": true,
+			"States": [
+				{
+					"Image": "imgs/actions/new-chat/key",
+					"TitleAlignment": "bottom",
+					"FontSize": 12,
+					"ShowTitle": true
+				}
+			]
+		},
+		{
+			"Name": "📸 이거 뭐야",
+			"UUID": "com.etude.mascot.screen-ask",
+			"Icon": "imgs/actions/screen-ask/icon",
+			"Tooltip": "화면을 찍어서 캐릭터에게 물어봐요. 질문은 버튼 설정에서.",
+			"Controllers": [
+				"Keypad"
+			],
+			"SupportedInMultiActions": true,
+			"States": [
+				{
+					"Image": "imgs/actions/screen-ask/key",
+					"TitleAlignment": "bottom",
+					"FontSize": 12,
+					"ShowTitle": true
+				}
+			],
+			"PropertyInspectorPath": "ui/screen-ask.html"
+		},
+		{
+			"Name": "🌐 번역",
+			"UUID": "com.etude.mascot.translate",
+			"Icon": "imgs/actions/translate/icon",
+			"Tooltip": "복사한 글을 번역해서 클립보드에 넣어 줘요.",
+			"Controllers": [
+				"Keypad"
+			],
+			"SupportedInMultiActions": true,
+			"States": [
+				{
+					"Image": "imgs/actions/translate/key",
+					"TitleAlignment": "bottom",
+					"FontSize": 12,
+					"ShowTitle": true
+				}
+			]
+		},
+		{
+			"Name": "✍️ 다듬기",
+			"UUID": "com.etude.mascot.polish",
+			"Icon": "imgs/actions/polish/icon",
+			"Tooltip": "복사한 글을 자연스럽게 다듬어 클립보드에 넣어 줘요.",
+			"Controllers": [
+				"Keypad"
+			],
+			"SupportedInMultiActions": true,
+			"States": [
+				{
+					"Image": "imgs/actions/polish/key",
+					"TitleAlignment": "bottom",
+					"FontSize": 12,
+					"ShowTitle": true
+				}
+			]
+		},
+		{
+			"Name": "💭 정해진 말",
+			"UUID": "com.etude.mascot.phrase",
+			"Icon": "imgs/actions/phrase/icon",
+			"Tooltip": "버튼에 정해 둔 말을 캐릭터에게 건네요.",
+			"Controllers": [
+				"Keypad"
+			],
+			"SupportedInMultiActions": true,
+			"States": [
+				{
+					"Image": "imgs/actions/phrase/key",
+					"TitleAlignment": "bottom",
+					"FontSize": 12,
+					"ShowTitle": true
+				}
+			],
+			"PropertyInspectorPath": "ui/phrase.html"
+		},
+		{
+			"Name": "🔋 사용량",
+			"UUID": "com.etude.mascot.usage",
+			"Icon": "imgs/actions/usage/icon",
+			"Tooltip": "Claude 5시간 사용량을 %로 보여 줘요. 누르면 새로고침.",
+			"Controllers": [
+				"Keypad"
+			],
+			"SupportedInMultiActions": true,
+			"States": [
+				{
+					"Image": "imgs/actions/usage/key",
+					"TitleAlignment": "bottom",
+					"FontSize": 12,
+					"ShowTitle": true
+				}
+			]
+		},
+		{
+			"Name": "😊 표정",
+			"UUID": "com.etude.mascot.expression",
+			"Icon": "imgs/actions/expression/icon",
+			"Tooltip": "캐릭터 표정을 바꾸고 대사를 띄워요. 표정이 없는 모델이면 몸짓.",
+			"Controllers": [
+				"Keypad"
+			],
+			"SupportedInMultiActions": true,
+			"States": [
+				{
+					"Image": "imgs/actions/expression/key",
+					"TitleAlignment": "bottom",
+					"FontSize": 12,
+					"ShowTitle": true
+				}
+			],
+			"PropertyInspectorPath": "ui/expression.html"
+		},
+		{
+			"Name": "📖 같이 공부",
+			"UUID": "com.etude.mascot.study",
+			"Icon": "imgs/actions/study/icon",
+			"Tooltip": "같이 공부 모드를 켜고 꺼요.",
+			"Controllers": [
+				"Keypad"
+			],
+			"SupportedInMultiActions": true,
+			"States": [
+				{
+					"Image": "imgs/actions/study/key",
+					"TitleAlignment": "bottom",
+					"FontSize": 12,
+					"ShowTitle": true
+				}
+			]
+		},
+		{
+			"Name": "🤖 Claude 모드",
+			"UUID": "com.etude.mascot.mode",
+			"Icon": "imgs/actions/mode/icon",
+			"Tooltip": "Claude 모드를 켜고 꺼요 (끄면 혼잣말 피규어).",
+			"Controllers": [
+				"Keypad"
+			],
+			"SupportedInMultiActions": true,
+			"States": [
+				{
+					"Image": "imgs/actions/mode/key",
+					"TitleAlignment": "bottom",
+					"FontSize": 12,
+					"ShowTitle": true
+				}
+			]
+		}
+	]
+}

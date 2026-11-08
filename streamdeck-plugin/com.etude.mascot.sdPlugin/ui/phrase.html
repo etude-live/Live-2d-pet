@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="ko">
+	<head>
+		<meta charset="utf-8" />
+		<title>정해진 말 설정</title>
+		<!-- sdpi-components: 빌드 때 받아 둔 파일, 없으면 인터넷에서 -->
+		<script src="sdpi-components.js"></script>
+		<script>
+			if (!window.customElements || !customElements.get("sdpi-item"))
+				document.write("<script src=\"https://sdpi-components.dev/releases/v4/sdpi-components.js\"><\/script>");
+		</script>
+		<link rel="stylesheet" href="pi.css" />
+	</head>
+	<body>
+		<p class="help">누르면 이 말을 캐릭터에게 건네요 (입력칸에 친 것과 같아요).<br />이 버튼을 여러 칸에 놓고 칸마다 다른 말을 적을 수 있어요.</p>
+		<sdpi-item label="할 말">
+			<sdpi-textarea setting="text" default="오늘 할 일 정리해 줘" rows="3" maxlength="500"></sdpi-textarea>
+		</sdpi-item>
+		<p class="help">Claude 모드가 꺼져 있거나 캐릭터가 일하는 중이면 ⚠️ 가 떠요.</p>
+	</body>
+</html>
