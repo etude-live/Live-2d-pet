@@ -1,6 +1,8 @@
 # (계획) 노래 따라 흥얼거리기 — 이어받을 세션용 메모
 
-> 상태: **아직 안 만듦.** 사용자와 합의한 방향만 정리. 앱 코드(`src/`, `tools/`)를 고치는 작업이라 이 문서를 읽은 세션이 맡는다.
+> 상태: **1단계(진단) 만듦.** 우클릭 → 🧰 도구 → 🎵 Music 가사 읽기 테스트.
+> `tools/ax-read.swift --music` (Music 만 허용, 가사 글자는 안 내보냄) + `src/main/music-lyrics.js` 의 `musicTest()`.
+> 1.5초 간격으로 3번 읽어 `~/Library/Application Support/Live2D Desktop Mascot/music-read.txt` 에 저장 → 사용자가 보내 주면 2단계(판별 규칙·본 기능).
 
 ## 하고 싶은 것
 Mac 의 **Music 앱(Apple Music)** 에서 노래가 재생되면, 캐릭터가 **지금 부르는 가사 줄을 말풍선으로** 띄워 흥얼거리는 것처럼 보이게 한다.

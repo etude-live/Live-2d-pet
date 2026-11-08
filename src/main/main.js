@@ -13,6 +13,7 @@ const { checkForUpdate, startAutoUpdate, currentBuild, currentVersion, justUpdat
 const { createMemory } = require('./memory');
 const { createMutter } = require('./mutter');
 const { createClaudeWatch } = require('./claude-watch');
+const { musicTest } = require('./music-lyrics');
 const { createReminders } = require('./reminders');
 const { createPomodoro } = require('./pomodoro');
 const { z } = require('zod');
@@ -994,6 +995,20 @@ async function checkPermissions() {
   if (response === 0) lost.forEach((k, i) => setTimeout(() => shell.openExternal(PANES[k][1]), i * 1500));
 }
 
+// ===== 노래 따라 흥얼거리기 (docs/LYRICS-HUM.md) — 1단계: 진단 =====
+async function musicLyricsTest() {
+  mascotSay('Music 창을 살펴볼게요… (3초쯤)');
+  const r = await musicTest(app, app.getPath('userData'));
+  if (!r.ok) {
+    if (r.error === 'not-trusted') studyNeedsPermission();
+    else mascotSay({ 'no-app': 'Music 앱이 안 켜져 있어요', 'no-window': 'Music 창을 못 찾았어요', 'no-helper': '이 빌드엔 읽기 도구가 없어요' }[r.error] || '읽기 실패: ' + r.error);
+    return r;
+  }
+  mascotSay(r.textNodes ? `글자 있는 칸 ${r.textNodes}개를 찾았어요! 열린 파일을 보여 주세요` : 'Music 창에서 글자를 못 찾았어요. 파일을 보여 주세요');
+  shell.openPath(r.file);
+  return r;
+}
+
 // ===== 같이 공부 모드 (Claude 앱 창을 읽고 한두 마디 거듦) =====
 function studyNeedsPermission() {
   mascotSay('손쉬운 사용 권한이 안 맞아요. 목록에서 이 앱을 골라 [−]로 지우고, [+]로 다시 넣은 뒤 앱을 껐다 켜 주세요 (업데이트하면 Mac이 다른 앱으로 봐요)');
@@ -1162,6 +1177,7 @@ function mainItems() {
         { label: `📋 클립보드 번역\t${KEY(CLIP_KEYS.translate)}`, click: () => clipAction('translate') },
         { label: `📋 클립보드 다듬기\t${KEY(CLIP_KEYS.polish)}`, click: () => clipAction('polish') },
         ...(claudeOn() ? [{ label: `📸 화면 보고 도와줘\t${KEY(SCREEN_KEY)}`, click: () => captureScreen() }] : []),
+        ...(process.platform === 'darwin' ? [{ type: 'separator' }, { label: '🎵 Music 가사 읽기 테스트', click: () => musicLyricsTest() }] : []),
         { label: '⏰ 알림 목록', enabled: claudeOn(), click: () => { showTalk(true); showReply(false); sendTalk('agent-event', { type: 'note', text: reminders.list().map(reminders.describe).join('\n') || '맞춰 둔 알림이 없어요' }); } }
       ]
     }

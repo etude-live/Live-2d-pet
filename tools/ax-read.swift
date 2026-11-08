@@ -24,6 +24,77 @@ let appName = args.first(where: { !$0.hasPrefix("--") }) ?? "Claude"
 let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: prompt] as CFDictionary
 if !AXIsProcessTrustedWithOptions(opts) { out(["ok": false, "error": "not-trusted"]) }
 
+// ===== Music 가사 진단 (--music) =====
+// Apple Music(com.apple.Music) 창의 구조만 내보낸다: 역할·위치·크기·속성·글자 수·글자 종류.
+// 가사 글자 자체는 내보내지 않는다 (판별 규칙을 정하기 위한 진단용).
+func scriptKind(_ t: String) -> String {
+  var h = 0, l = 0, j = 0
+  for u in t.unicodeScalars {
+    switch u.value {
+    case 0xAC00...0xD7A3, 0x1100...0x11FF, 0x3130...0x318F: h += 1
+    case 0x41...0x5A, 0x61...0x7A, 0xC0...0x24F: l += 1
+    case 0x3040...0x30FF, 0x4E00...0x9FFF: j += 1
+    default: break
+    }
+  }
+  let total = h + l + j
+  if total == 0 { return "-" }
+  if h * 10 >= total * 8 { return "한" }
+  if l * 10 >= total * 8 { return "영" }
+  if j * 10 >= total * 8 { return "일" }
+  return "섞임"
+}
+
+func musicDump() {
+  let running = NSWorkspace.shared.runningApplications.filter { $0.bundleIdentifier == "com.apple.Music" }
+  guard let music = running.first else { out(["ok": false, "error": "no-app"]); return }
+  let appEl = AXUIElementCreateApplication(music.processIdentifier)
+  var wins = (attr(appEl, kAXWindowsAttribute as String) as? [AXUIElement]) ?? []
+  if wins.isEmpty, let w = attr(appEl, kAXFocusedWindowAttribute as String) { wins = [w as! AXUIElement] }
+  if wins.isEmpty { out(["ok": false, "error": "no-window"]); return }
+  func rect(_ el: AXUIElement) -> CGRect {
+    var p = CGPoint.zero, sz = CGSize.zero
+    if let v = attr(el, kAXPositionAttribute as String) { AXValueGetValue(v as! AXValue, .cgPoint, &p) }
+    if let v = attr(el, kAXSizeAttribute as String) { AXValueGetValue(v as! AXValue, .cgSize, &sz) }
+    return CGRect(origin: p, size: sz)
+  }
+  let win = wins.max(by: { let a = rect($0), b = rect($1); return a.width * a.height < b.width * b.height })!
+  var nodes: [[String: Any]] = []
+  var attrNames = Set<String>()
+  func walk(_ el: AXUIElement, _ depth: Int) {
+    if nodes.count >= 20000 || depth > 80 { return }
+    let role = (attr(el, kAXRoleAttribute as String) as? String) ?? ""
+    let sub = (attr(el, kAXSubroleAttribute as String) as? String) ?? ""
+    let ident = (attr(el, "AXIdentifier") as? String) ?? ""
+    var text = "", src = ""
+    for (k, name) in [("v", kAXValueAttribute as String), ("t", kAXTitleAttribute as String), ("d", kAXDescriptionAttribute as String)] {
+      if let s = attr(el, name) as? String, !s.isEmpty { text = s; src = k; break }
+    }
+    let r = rect(el)
+    var n: [String: Any] = ["d": depth, "r": role, "x": Int(r.minX), "y": Int(r.minY), "w": Int(r.width), "h": Int(r.height)]
+    if !sub.isEmpty { n["sr"] = sub }
+    if !ident.isEmpty { n["id"] = ident }
+    if !text.isEmpty {
+      n["n"] = text.count; n["src"] = src; n["k"] = scriptKind(text)
+      var names: CFArray?
+      if AXUIElementCopyAttributeNames(el, &names) == .success, let list = names as? [String] { attrNames.formUnion(list) }
+    }
+    if let sel = attr(el, kAXSelectedAttribute as String) as? Bool { n["sel"] = sel }
+    if let foc = attr(el, kAXFocusedAttribute as String) as? Bool, foc { n["foc"] = true }
+    if let en = attr(el, kAXEnabledAttribute as String) as? Bool, !en { n["off"] = true }
+    nodes.append(n)
+    if let kids = attr(el, kAXChildrenAttribute as String) as? [AXUIElement] {
+      for k in kids { walk(k, depth + 1) }
+    }
+  }
+  walk(win, 0)
+  let wr = rect(win)
+  out(["ok": true, "app": "Music", "window": ["x": Int(wr.minX), "y": Int(wr.minY), "w": Int(wr.width), "h": Int(wr.height)],
+       "attrNames": Array(attrNames).sorted(), "nodes": nodes])
+}
+
+if args.contains("--music") { musicDump(); exit(0) }
+
 // Claude 데스크톱 앱만 (번들 ID 우선, 이름은 정확히 "Claude" 인 일반 앱만). Finder 등 다른 앱은 절대 안 읽음
 let running = NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular && $0.processIdentifier != getpid() }
 let target = running.first(where: { $0.bundleIdentifier == "com.anthropic.claudefordesktop" })
