@@ -1,0 +1,5 @@
+node_modules/
+dist/
+com.etude.musiccontrol.sdPlugin/bin/
+com.etude.musiccontrol.sdPlugin/logs/
+*.streamDeckPlugin

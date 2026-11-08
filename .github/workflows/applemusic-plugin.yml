@@ -1,0 +1,83 @@
+# Apple Music 스트림덱 플러그인(.streamDeckPlugin)을 만들어 릴리스(태그 applemusic-N)에 올린다.
+# applemusic-plugin/** 가 바뀔 때만. Mac 러너에서 돌려 AppleScript 를 진짜 Music 앱 용어로 컴파일해 본다.
+# 앱 자동 업데이트가 releases/latest 를 보므로 "Latest" 로 표시하지 않는다.
+name: Build Apple Music plugin
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/stoic-davinci-mocgrx, main]
+    paths: ['applemusic-plugin/**', '.github/workflows/applemusic-plugin.yml']
+  pull_request:
+    paths: ['applemusic-plugin/**', '.github/workflows/applemusic-plugin.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  plugin:
+    runs-on: macos-15
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: applemusic-plugin
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: applemusic-plugin/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Version (MAJOR.MINOR from package.json, PATCH = run number)
+        run: echo "VERSION=$(node scripts/sync-version.mjs ${{ github.run_number }})" >> "$GITHUB_ENV"
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      - name: AppleScript check (osacompile against Music.app)
+        run: node scripts/check-applescript.mjs
+
+      - name: Build
+        run: npm run build
+
+      - name: End-to-end smoke test (built plugin ↔ fake Stream Deck ↔ fake osascript)
+        run: npm run e2e
+
+      - name: Validate and pack
+        run: |
+          npx streamdeck validate com.etude.musiccontrol.sdPlugin
+          npm run pack
+          mv dist/com.etude.musiccontrol.streamDeckPlugin "dist/AppleMusic-Control-StreamDeck-$VERSION.streamDeckPlugin"
+          ls -l dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: applemusic-plugin
+          path: applemusic-plugin/dist/*.streamDeckPlugin
+          retention-days: 14
+
+      - name: Publish release (applemusic-N, not "Latest")
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          N=${{ github.run_number }}
+          {
+            echo "Apple Music 컨트롤 (스트림덱 플러그인) v$VERSION"
+            echo
+            echo "**설치:** 아래 \`.streamDeckPlugin\` 파일을 받아 더블클릭하세요. (Mac 전용)"
+            echo "설명서: https://github.com/${{ github.repository }}/blob/$GITHUB_SHA/applemusic-plugin/README.md"
+            echo
+            git log -1 --format='%s%n%n%b' | grep -v -E '^(Co-Authored-By|Claude-Session):'
+          } > notes.md
+          gh release create "applemusic-$N" dist/*.streamDeckPlugin \
+            --title "Apple Music 컨트롤 v$VERSION" --notes-file notes.md \
+            --target "$GITHUB_SHA" --latest=false

@@ -1,0 +1,39 @@
+{
+  "name": "applemusic-streamdeck",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Apple Music(Mac 의 Music 앱) 재생/일시정지·이전·다음 Stream Deck 플러그인",
+  "type": "module",
+  "scripts": {
+    "build": "npm run icons && rollup -c",
+    "icons": "node scripts/make-icons.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "e2e": "node test/e2e-smoke.mjs",
+    "validate": "streamdeck validate com.etude.musiccontrol.sdPlugin",
+    "pack": "streamdeck pack com.etude.musiccontrol.sdPlugin --output dist --force",
+    "version:sync": "node scripts/sync-version.mjs"
+  },
+  "engines": {
+    "node": ">=22.18"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@elgato/streamdeck": "^2.1.2"
+  },
+  "devDependencies": {
+    "@elgato/cli": "^1.10.4",
+    "@resvg/resvg-js": "^2.6.2",
+    "@rollup/plugin-commonjs": "^29.0.3",
+    "@rollup/plugin-node-resolve": "^16.0.3",
+    "@rollup/plugin-terser": "^1.0.2",
+    "@rollup/plugin-typescript": "^12.3.1",
+    "@types/node": "^20.19.43",
+    "@types/ws": "^8.18.2",
+    "rollup": "^4.68.0",
+    "tslib": "^2.9.1",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.7",
+    "ws": "^8.22.1"
+  }
+}
