@@ -490,7 +490,12 @@ const onMascot = (channel, fn) => ipcMain.on(channel, (event, arg) => {
   if (m) fn(m, arg);
 });
 
-onMascot('expressions', (m, list) => { m.expressions = Array.isArray(list) ? list.map(String).slice(0, 100) : []; m.expression = null; });
+onMascot('expressions', (m, list) => {
+  m.expressions = Array.isArray(list) ? list.map(String).slice(0, 100) : [];
+  m.expression = null;
+  // 모델이 바뀜 → 스트림덱 표정 버튼 설정 화면이 목록을 새로 받게
+  if (m === primaryMascot()) bridge?.broadcast({ type: 'expressions', payload: { expressions: m.expressions, current: null } });
+});
 onMascot('expression-now', (m, name) => { m.expression = name || null; bridge?.broadcast({ type: 'expression', payload: { name: m.expression } }); });
 
 onMascot('model-bounds', (m, inset) => {
@@ -789,6 +794,7 @@ function fireReminder(r) {
   bridge?.broadcast?.({ type: 'reminder', payload: { text } });
 }
 
+let agentState = 'idle';   // 스트림덱 state.get 용 (working / asking / idle)
 const agent = createAgent({
   getOptions: () => agentConf,
   getMemory: () => memory?.read() || '',
@@ -803,7 +809,7 @@ const agent = createAgent({
   onEvent: (e) => {
     if (e.type === 'usage') { onUsage(e.windows); return; }
     const st = { start: 'working', permission: 'asking', permissionDone: 'working', idle: 'idle' }[e.type];
-    if (st) bridge?.broadcast({ type: 'agent', payload: { state: st } });
+    if (st) { agentState = st; bridge?.broadcast({ type: 'agent', payload: { state: st } }); }
     const talkOpen = (alive(talk.input) && talk.input.isVisible()) || (alive(talk.reply) && talk.reply.isVisible());
     sendTalk('agent-event', e);
     if (e.type === 'permission') showReply(false);   // 승인은 말풍선 안의 버튼으로 받는다
@@ -1076,7 +1082,11 @@ async function clipAction(kind) {
     return { ok: true };
   } catch (e) {
     sendTalk('agent-event', { type: 'error', message: `${label}하지 못했어요: ${e.message}` });
-    return { ok: false, error: e.message };
+    // 스트림덱이 짧게 보여 줄 수 있게 정해진 이름으로 (자세한 문장은 message)
+    const code = /로그인|login|auth|401|credential/i.test(e.message) ? 'not-logged-in'
+      : /rate|limit|한도|429|overloaded/i.test(e.message) ? 'rate-limited'
+      : /결과가 비어/.test(e.message) ? 'empty-result' : 'failed';
+    return { ok: false, error: code, message: e.message };
   } finally {
     clipBusy = false;
   }
@@ -1425,7 +1435,16 @@ async function handleCommand(payload = {}, client) {
       case 'pomodoro.skip': result = { ok: true, state: pomodoro.skip() }; break;
       case 'reminder.list': result = { ok: true, reminders: reminders.list().map((r) => ({ id: r.id, text: r.text, at: r.at, daily: r.daily })) }; break;
       case 'mascot.say': primaryMascot()?.win.webContents.send('bridge-event', { type: 'say', payload: { text: String(args.text || '') } }); result = { ok: true }; break;
-      case 'state.get': result = { ok: true, claude: claudeOn(), agent: agent.busy ? 'working' : 'idle', pomodoro: pomodoro.state(), usage, version: currentVersion(), build: currentBuild() }; break;
+      case 'state.get': {
+        const pm = primaryMascot();
+        result = {
+          ok: true, claude: claudeOn(), study: !!agentConf.study,
+          agent: agentState === 'asking' || agent.busy ? agentState : 'idle',
+          expression: pm?.expression || null, expressions: pm?.expressions || [],
+          pomodoro: pomodoro.state(), usage, version: app.getVersion(), build: currentBuild()
+        };
+        break;
+      }
       case 'usage.get': await agent.refreshUsage(); result = { ok: true, usage }; break;
       default: result = { ok: false, error: 'unknown-command' };
     }

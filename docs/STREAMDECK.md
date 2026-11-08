@@ -60,6 +60,7 @@
 | `reminder` | `{ text }` | 맞춰 둔 알림이 울릴 때 |
 | `usage` | `{ five_hour?: { utilization(0~1), resetsAt(ms), status }, seven_day?: {…}, … }` | Claude Pro/Max 사용량이 갱신될 때 (대화할 때마다) |
 | `mode` | `{ claude }` | Claude 모드를 켜거나 껐을 때 |
+| `expressions` | `{ expressions: [이름…], current }` | 캐릭터 모델이 바뀌어 표정 목록이 달라졌을 때 |
 | `expression` | `{ name }` | 표정이 바뀌었을 때 (`null` = 원래 얼굴). 버튼 켜짐 표시용 |
 | `study` | `{ on }` | 같이 공부 모드를 켜거나 껐을 때 |
 | `pong` | | `{ "v":1, "type":"ping" }` 에 대한 답 |
@@ -80,8 +81,8 @@
 | `talk.send` | `{ text }` | 캐릭터에게 이 말을 건넴 (입력칸에 친 것과 같음) | 바쁘면 `error: "busy"` |
 | `agent.stop` | | 하던 일 멈추기 | |
 | `agent.newChat` | | 새 대화 시작 (지난 대화는 기억으로 압축) | |
-| `clip.translate` | | 클립보드 글 번역 → 결과를 클립보드에 | |
-| `clip.polish` | | 클립보드 글 다듬기 → 결과를 클립보드에 | |
+| `clip.translate` | | 클립보드 글 번역 → 결과를 클립보드에 (Claude 모드와 상관없이 동작) | 실패 `error`: `empty`(복사한 글 없음) `busy` `not-logged-in` `rate-limited` `empty-result` `failed`, 자세한 문장은 `message` |
+| `clip.polish` | | 클립보드 글 다듬기 → 결과를 클립보드에 | `clip.translate` 와 같음 |
 | `screen.ask` | `{ question? }` | 화면을 찍어 붙임. `question` 이 있으면 바로 물어봄, 없으면 입력칸에 첨부만 | macOS 화면 녹화 권한이 없으면 `error: "screen-permission"` |
 | `pomodoro.start` | `{ work?, break?, long?, cycles? }` (분, 기본 25/5/15/4) | 시작 (돌고 있으면 새로 시작) | `state` |
 | `pomodoro.toggle` | 위와 같음 | 돌고 있으면 끝, 아니면 시작 | `state` |
@@ -94,7 +95,7 @@
 | `expression.reset` | | 원래 얼굴로 | |
 | `motion.play` | `{ text? }` | 몸짓 하나 (+ 말풍선) | |
 | `mascot.say` | `{ text }` | 캐릭터가 말풍선으로 말함 (Claude 안 씀, 토큰 0) | |
-| `state.get` | | 지금 상태 | `{ claude, agent, pomodoro, usage, build }` |
+| `state.get` | | 지금 상태 (처음 연결할 때 한 번) | `{ claude, study, agent(working/asking/idle), expression, expressions, pomodoro, usage, version, build }` |
 | `usage.get` | | 사용량 새로 가져오기 (가능하면) | `{ usage }` |
 
 ## 4. 터미널에서 시험
