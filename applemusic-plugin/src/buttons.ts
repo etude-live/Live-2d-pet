@@ -1,6 +1,7 @@
 // 버튼 3개 (⏮ 이전 · ⏯ 재생/일시정지 · ⏭ 다음). Stream Deck SDK 와 무관 → 가짜 키로 테스트.
 //
-// - Music 이 꺼져 있으면: 흐린 그림 + "Music 열기 / 실행 중 아님", 누르면 Music 을 연다
+// - Music 이 꺼져 있으면: 음표 배지 + 기호 + "Music 열기 / 실행 중 아님", 누르면 Music 을 연다
+// - Music 이 켜져 있으면: 기호만 크게
 // - 제어 권한이 없으면: 주황 배지 + "권한 필요", 누르면 ⚠️
 // - ⏯ 은 재생 중이면 ❚❚ + 곡 제목, 멈춰 있으면 ▶ + "일시정지"
 import { type KeyArt, keySvg, toDataUrl } from "./icons";
@@ -86,7 +87,7 @@ export class MusicButton {
 		const st = this.music.status;
 		const isPlay = this.command === "playpause";
 		const glyph = isPlay ? (st.state === "playing" ? "pause" : "play") : this.command;
-		if (st.state === "off") return { art: { glyph, dim: true }, title: TITLE_OFF };
+		if (st.state === "off") return { art: { glyph, badge: true }, title: TITLE_OFF };
 		if (st.state === "denied") return { art: { glyph, warn: true }, title: TITLE_DENIED };
 		if (!isPlay) return { art: { glyph } };
 		if (st.state === "playing") return { art: { glyph }, title: st.track ? shorten(st.track) : undefined };

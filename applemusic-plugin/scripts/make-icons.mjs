@@ -16,11 +16,11 @@ const write = (rel, data) => {
 
 const glyphs = { previous: "previous", playpause: "play", next: "next" };
 for (const [id, g] of Object.entries(glyphs)) {
-	write(`actions/${id}/key.svg`, keySvg({ glyph: g }) + "\n");
+	write(`actions/${id}/key.svg`, keySvg({ glyph: g, badge: true }) + "\n");
 	write(`actions/${id}/icon.svg`, listIconSvg(g) + "\n");
 }
 // 플러그인 아이콘은 PNG (256, @2x 512), 분류 아이콘은 SVG
-const pluginSvg = keySvg({ glyph: "play" });
+const pluginSvg = keySvg({ glyph: "play", badge: true });
 for (const [suffix, size] of [["", 256], ["@2x", 512]]) write(`plugin/icon${suffix}.png`, new Resvg(pluginSvg, { fitTo: { mode: "width", value: size } }).render().asPng());
 write("plugin/category.svg", listIconSvg("play") + "\n");
 console.log("아이콘을 만들었어요:", root);

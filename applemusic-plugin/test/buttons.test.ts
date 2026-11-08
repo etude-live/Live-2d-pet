@@ -52,15 +52,25 @@ describe("버튼", () => {
 		expect(shorten("Bohemian Rhapsody")).toBe("Bohemi…");
 	});
 
-	it("Music 이 꺼져 있으면 흐리게 + 'Music 열기 / 실행 중 아님', 누르면 Music 을 연다", async () => {
+	it("Music 이 꺼져 있으면 음표 배지(흐리지 않게) + 'Music 열기 / 실행 중 아님', 누르면 Music 을 연다", async () => {
 		const t = await setup({ running: false });
 		for (const k of Object.values(t.keys)) {
 			expect(k.title).toBe(TITLE_OFF);
-			expect(k.svg).toContain("#2a2a2e");
+			expect(k.svg).toContain('<circle cx="44"'); // 배지
+			expect(k.svg).toContain("url(#g)"); // 색 그대로
+			expect(k.svg).not.toContain("scale(2)");
 		}
 		await t.next.press(t.keys.next.id);
 		expect(t.f.opened()).toBe(1);
 		expect(t.f.calls).not.toContain("next");
+	});
+
+	it("Music 이 켜져 있으면 배지 없이 기호만 크게", async () => {
+		const t = await setup({ state: "paused" });
+		for (const k of Object.values(t.keys)) {
+			expect(k.svg).not.toContain('<circle cx="44"');
+			expect(k.svg).toContain("scale(2)");
+		}
 	});
 
 	it("재생 중: ❚❚ + 곡 제목 / 일시정지: ▶ + '일시정지'", async () => {
