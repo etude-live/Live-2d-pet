@@ -52,8 +52,14 @@ jobs:
           swiftc -O tools/ax-read.swift -o build/bin/ax-read
           ls -l build/bin
 
+      # electron-builder 가 GitHub 에서 받는 도구(아이콘 변환 묶음 등)가 가끔 504 로 끊긴다 → 최대 4번 다시
       - name: Build app (unpacked)
-        run: npx electron-builder --mac dir --arm64 --publish never
+        run: |
+          for i in 1 2 3 4; do
+            npx electron-builder --mac dir --arm64 --publish never && exit 0
+            echo "빌드 실패 ($i번째), 30초 뒤 다시"; sleep 30
+          done
+          exit 1
 
       # 저장소 Secrets 에 고정 인증서(MAC_CERT_P12, MAC_CERT_PASSWORD)가 있으면 그걸로 서명한다.
       # 서명이 매번 같아야 Mac 이 업데이트 뒤에도 같은 앱으로 보고 권한(화면 녹화·손쉬운 사용)을 유지한다.
