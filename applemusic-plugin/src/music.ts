@@ -32,14 +32,14 @@ end if`;
 export const SCRIPTS: Record<"status" | Command, string> = {
 	status: `if application "Music" is running then
 	tell application "Music"
-		set st to player state as string
-		set nm to ""
-		set ar to ""
+		set playerState to player state as string
+		set trackName to ""
+		set trackArtist to ""
 		try
-			set nm to name of current track
-			set ar to artist of current track
+			set trackName to name of current track
+			set trackArtist to artist of current track
 		end try
-		return st & tab & nm & tab & ar
+		return playerState & tab & trackName & tab & trackArtist
 	end tell
 else
 	return "off"

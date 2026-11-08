@@ -9,7 +9,11 @@ import { SCRIPTS } from "../src/music.ts";
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "osa-"));
 for (const [name, script] of Object.entries(SCRIPTS)) {
-	execFileSync("osacompile", ["-o", path.join(dir, `${name}.scpt`), "-e", script]);
+	try {
+		execFileSync("osacompile", ["-o", path.join(dir, `${name}.scpt`), "-e", script], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+	} catch (e) {
+		throw new Error(`AppleScript '${name}' 컴파일 실패: ${String(e.stderr || e.message).trim()}`);
+	}
 	console.log(`✓ compile ${name}`);
 }
 const running = () => execFileSync("pgrep", ["-x", "Music"], { encoding: "utf8" }).trim() !== "";
