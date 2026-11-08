@@ -33,6 +33,15 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Electron·electron-builder 도구를 한 번 받으면 저장해 둠 (GitHub 다운로드가 불안정할 때 덜 흔들리게)
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/electron
+            ~/Library/Caches/electron-builder
+          key: electron-mac-${{ hashFiles('package-lock.json') }}
+          restore-keys: electron-mac-
+
       # 버전 = package.json 의 MAJOR.MINOR + PATCH(그 MAJOR.MINOR 로 바꾼 커밋 뒤의 커밋 수).
       # 빌드 번호(run_number)는 업데이트 비교용으로 따로 둔다 (릴리스 태그 build-N).
       - name: Stamp version and build number
