@@ -5,10 +5,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { SCRIPTS } from "../src/music.ts";
+import { SCRIPTS, artworkScript } from "../src/music.ts";
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "osa-"));
-for (const [name, script] of Object.entries(SCRIPTS)) {
+const all = { ...SCRIPTS, artwork: artworkScript(path.join(dir, "art")) };
+for (const [name, script] of Object.entries(all)) {
 	try {
 		execFileSync("osacompile", ["-o", path.join(dir, `${name}.scpt`), "-e", script], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
 	} catch (e) {

@@ -5,10 +5,11 @@ Mac 의 **Music 앱(Apple Music)** 을 Stream Deck 버튼으로 조작해요.
 | 버튼 | 누르면 | 버튼에 보이는 것 |
 |---|---|---|
 | ⏮ **이전 곡** | 이전 곡 (곡 중간이면 처음으로 — Music 앱의 ⏮ 와 같아요) | |
-| ⏯ **재생 / 일시정지** | 재생 ↔ 일시정지 | 재생 중이면 ❚❚ + **곡 제목**, 멈춰 있으면 ▶ + "일시정지" |
+| ⏯ **재생 / 일시정지** | 재생 ↔ 일시정지 | 재생 중이면 **앨범 표지** (표지가 없는 곡은 큰 ❚❚), 멈춰 있으면 큰 ▶ |
 | ⏭ **다음 곡** | 다음 곡 | |
 
-- Music 앱이 꺼져 있으면 버튼이 흐려지고 **"Music 열기 / 실행 중 아님"** 이 떠요. 그때 아무 버튼이나 누르면 Music 앱이 열려요.
+- Music 이 켜져 있을 때는 기호(또는 앨범 표지)만 크게, 글자 없이 보여요.
+- Music 앱이 꺼져 있으면 음표 그림과 **"Music 열기 / 실행 중 아님"** 이 떠요. 그때 아무 버튼이나 누르면 Music 앱이 열려요.
 - 버튼은 1.5초마다 Music 앱 상태를 확인해서 저절로 바뀌어요 (Music 앱이나 키보드로 재생해도 따라와요).
 - 필요한 것: **Mac** + **Stream Deck 앱 6.5 이상**. 마스코트 앱과는 상관없이 따로 동작해요.
 
@@ -38,7 +39,7 @@ Releases 에서 더 새 파일을 받아 더블클릭 → 설치. 놓아 둔 버
 
 ## 개발자용
 
-- `src/music.ts`: AppleScript(osascript)로 Music 조작·상태 확인. 모든 스크립트가 `application "Music" is running` 을 먼저 봐서, 꺼져 있을 때 Music 을 켜 버리지 않아요.
+- `src/music.ts`: AppleScript(osascript)로 Music 조작·상태 확인·앨범 표지(곡이 바뀔 때만, `sips` 로 144px 로 줄임). 모든 스크립트가 `application "Music" is running` 을 먼저 봐서, 꺼져 있을 때 Music 을 켜 버리지 않아요.
 - `src/buttons.ts`: 버튼 3개의 그림·제목·누름. `src/plugin.ts`: Stream Deck SDK(@elgato/streamdeck) 연결.
 - 테스트: `npm test` (가짜 Music), `npm run build && npm run e2e` (빌드된 플러그인 ↔ 가짜 Stream Deck ↔ 가짜 osascript),
   `node scripts/check-applescript.mjs` (Mac 에서만: 스크립트를 진짜 Music 용어로 컴파일).

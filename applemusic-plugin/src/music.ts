@@ -4,6 +4,9 @@
 // - 처음 조작할 때 macOS 가 "Stream Deck 이(가) Music 을 제어하려고 합니다" 하고 묻는다. 거절하면 -1743 오류 → "denied".
 import { execFile } from "node:child_process";
 import { EventEmitter } from "node:events";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 export type PlayerState = "off" | "playing" | "paused" | "stopped" | "denied" | "error";
 
@@ -11,6 +14,7 @@ export interface MusicStatus {
 	state: PlayerState;
 	track?: string;
 	artist?: string;
+	album?: string;
 }
 
 export type Command = "playpause" | "next" | "previous";
@@ -19,6 +23,8 @@ export type Command = "playpause" | "next" | "previous";
 export type RunResult = { ok: true; out: string } | { ok: false; error: string };
 export type Runner = (script: string) => Promise<RunResult>;
 export type Opener = () => Promise<void>;
+/** 지금 곡의 앨범 표지를 data URL 로 (없으면 null) */
+export type ArtLoader = () => Promise<string | null>;
 
 const ifRunning = (body: string) => `if application "Music" is running then
 	tell application "Music"
@@ -35,11 +41,13 @@ export const SCRIPTS: Record<"status" | Command, string> = {
 		set playerState to player state as string
 		set trackName to ""
 		set trackArtist to ""
+		set trackAlbum to ""
 		try
 			set trackName to name of current track
 			set trackArtist to artist of current track
+			set trackAlbum to album of current track
 		end try
-		return playerState & tab & trackName & tab & trackArtist
+		return playerState & tab & trackName & tab & trackArtist & tab & trackAlbum
 	end tell
 else
 	return "off"
@@ -63,10 +71,12 @@ export function isNotRunning(error: string): boolean {
 export function parseStatus(out: string): MusicStatus {
 	const text = out.replace(/\r?\n$/, "");
 	if (text.trim() === "off") return { state: "off" };
-	const [st, track = "", artist = ""] = text.split("\t");
+	const [st, track = "", artist = "", album = ""] = text.split("\t");
 	const state: PlayerState = st === "playing" ? "playing" : st === "paused" ? "paused" : st === "stopped" ? "stopped" : st?.trim() ? "playing" : "error";
 	// fast forwarding / rewinding 도 재생 중으로 본다
-	return { state, track: track || undefined, artist: artist || undefined };
+	const status: MusicStatus = { state, track: track || undefined, artist: artist || undefined };
+	if (album) status.album = album;
+	return status;
 }
 
 function run(bin: string, args: string[], timeout: number): Promise<RunResult> {
@@ -90,9 +100,71 @@ export function musicOpener(bin = process.env.MUSIC_OPEN || "open"): Opener {
 	};
 }
 
+/**
+ * 지금 곡의 앨범 표지를 file 에 저장하는 스크립트. 결과: "ok" / "none"(표지 없음) / "off"
+ * (파일 쓰기는 Music 이 아니라 osascript 가 하도록 tell 블록 밖에서)
+ */
+export function artworkScript(file: string): string {
+	const posix = file.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+	return `if application "Music" is running then
+	tell application "Music"
+		try
+			set artData to raw data of artwork 1 of current track
+		on error
+			return "none"
+		end try
+	end tell
+	set outFile to open for access (POSIX file "${posix}") with write permission
+	try
+		set eof outFile to 0
+		write artData to outFile
+		close access outFile
+	on error
+		close access outFile
+		return "none"
+	end try
+	return "ok"
+else
+	return "off"
+end if`;
+}
+
+/** 그림 파일 → data URL (PNG/JPEG 만) */
+export function imageDataUrl(buf: Buffer): string | null {
+	const mime = buf[0] === 0x89 && buf[1] === 0x50 ? "image/png" : buf[0] === 0xff && buf[1] === 0xd8 ? "image/jpeg" : null;
+	return mime ? `data:${mime};base64,${buf.toString("base64")}` : null;
+}
+
+/**
+ * 진짜 앨범 표지 가져오기: osascript 로 파일에 저장 → sips(macOS 기본)로 144px 로 줄임 → data URL.
+ * sips 가 없거나 실패하면 원본 그대로.
+ */
+export function artworkLoader(runner: Runner, sipsBin = process.env.MUSIC_SIPS || "sips"): ArtLoader {
+	let dir: string | null = null;
+	let n = 0;
+	return async () => {
+		dir ??= fs.mkdtempSync(path.join(os.tmpdir(), "sd-music-art-"));
+		const raw = path.join(dir, `art-${++n}`);
+		const small = `${raw}.png`;
+		try {
+			const r = await runner(artworkScript(raw));
+			if (!r.ok || r.out.trim() !== "ok" || !fs.existsSync(raw)) return null;
+			const s = await run(sipsBin, ["-s", "format", "png", "-Z", "144", raw, "--out", small], 5000);
+			const file = s.ok && fs.existsSync(small) ? small : raw;
+			return imageDataUrl(fs.readFileSync(file));
+		} catch {
+			return null;
+		} finally {
+			fs.rmSync(raw, { force: true });
+			fs.rmSync(small, { force: true });
+		}
+	};
+}
+
 export interface MusicOptions {
 	runner?: Runner;
 	opener?: Opener;
+	artLoader?: ArtLoader;
 	pollMs?: number;
 }
 
@@ -102,6 +174,10 @@ export interface MusicOptions {
  */
 export class Music extends EventEmitter {
 	status: MusicStatus = { state: "off" };
+	/** 지금 곡의 앨범 표지 (data URL). 없거나 아직 못 받았으면 null */
+	artwork: string | null = null;
+	private artKey: string | null = null;
+	private readonly artLoader: ArtLoader;
 	private readonly runner: Runner;
 	private readonly opener: Opener;
 	private readonly pollMs: number;
@@ -113,6 +189,7 @@ export class Music extends EventEmitter {
 		this.setMaxListeners(50);
 		this.runner = opt.runner ?? osascriptRunner();
 		this.opener = opt.opener ?? musicOpener();
+		this.artLoader = opt.artLoader ?? artworkLoader(this.runner);
 		this.pollMs = opt.pollMs ?? 1500;
 	}
 
@@ -173,5 +250,25 @@ export class Music extends EventEmitter {
 		const prev = this.status;
 		this.status = s;
 		if (prev.state !== s.state || prev.track !== s.track || prev.artist !== s.artist) this.emit("change", s);
+		this.updateArtwork();
+	}
+
+	/** 곡이 바뀌었을 때만 표지를 새로 가져온다 */
+	private updateArtwork(): void {
+		const s = this.status;
+		const on = s.state === "playing" || s.state === "paused" || s.state === "stopped";
+		const key = on && (s.track || s.album) ? [s.track, s.artist, s.album].join("\t") : null;
+		if (key === this.artKey) return;
+		this.artKey = key;
+		if (this.artwork !== null) {
+			this.artwork = null;
+			this.emit("change", s);
+		}
+		if (key === null) return;
+		void this.artLoader().then((url) => {
+			if (this.artKey !== key || !url) return; // 그새 곡이 바뀜
+			this.artwork = url;
+			this.emit("change", this.status);
+		});
 	}
 }

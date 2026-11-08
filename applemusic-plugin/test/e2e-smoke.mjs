@@ -13,7 +13,7 @@ const U = "com.etude.musiccontrol";
 const stateFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "music-e2e-")), "music.json");
 const writeState = (s) => fs.writeFileSync(stateFile, JSON.stringify(s));
 const readState = () => JSON.parse(fs.readFileSync(stateFile, "utf8"));
-writeState({ running: false, state: "paused", track: "밤양갱", artist: "비비", calls: [] });
+writeState({ running: false, state: "paused", track: "Song A", artist: "Artist A", album: "Album A", calls: [] });
 
 const got = [];
 const sd = new WebSocketServer({ port: 0, host: "127.0.0.1" });
@@ -50,13 +50,16 @@ try {
 
 	send("keyDown", "playpause", "p");
 	await wait(() => readState().opened === 1, "Music 열기");
-	await wait(() => title("p") === "일시정지", "켜진 뒤 일시정지 표시");
+	// 글자 없음 = title 없이 setTitle (사용자 제목 그대로)
+	await wait(() => got.some((m) => m.event === "setTitle" && m.context === "p" && m.payload.title === "Music 열기\n실행 중 아님") && title("p") === undefined, "켜진 뒤 글자 없음");
+	const image = (ctx) => got.filter((m) => m.event === "setImage" && m.context === ctx).at(-1)?.payload.image ?? "";
 
 	send("keyDown", "playpause", "p");
-	await wait(() => title("p") === "밤양갱", "재생 중 곡 제목");
+	await wait(() => image("p").startsWith("data:image/png;base64,"), "재생 중 앨범 표지");
+	if (readState().artLoads !== 1) throw new Error("표지를 곡마다 한 번만 가져와야 함");
 	send("keyDown", "next", "n");
 	await wait(() => readState().calls.includes("next"), "다음 곡");
-	console.log("✅ e2e: 꺼짐 표시 → 열기 → 재생 → 곡 제목 → 다음 곡 모두 OK");
+	console.log("✅ e2e: 꺼짐 표시 → 열기 → 재생 → 앨범 표지 → 다음 곡 모두 OK");
 } catch (e) {
 	console.error("❌", e.message);
 	process.exitCode = 1;

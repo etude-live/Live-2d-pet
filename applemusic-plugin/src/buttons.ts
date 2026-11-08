@@ -3,7 +3,7 @@
 // - Music 이 꺼져 있으면: 음표 배지 + 기호 + "Music 열기 / 실행 중 아님", 누르면 Music 을 연다
 // - Music 이 켜져 있으면: 기호만 크게
 // - 제어 권한이 없으면: 주황 배지 + "권한 필요", 누르면 ⚠️
-// - ⏯ 은 재생 중이면 ❚❚ + 곡 제목, 멈춰 있으면 ▶ + "일시정지"
+// - ⏯ 은 재생 중이면 앨범 표지(없으면 큰 ❚❚), 멈춰 있으면 큰 ▶. 글자는 쓰지 않는다
 import { type KeyArt, keySvg, toDataUrl } from "./icons";
 import type { Command, Music } from "./music";
 
@@ -17,18 +17,13 @@ export interface KeyHandle {
 
 export interface View {
 	art: KeyArt;
+	/** 그림 대신 이 이미지(data URL) — 앨범 표지 */
+	image?: string;
 	title?: string;
 }
 
 export const TITLE_OFF = "Music 열기\n실행 중 아님";
 export const TITLE_DENIED = "권한 필요";
-export const TITLE_PAUSED = "일시정지";
-
-/** 버튼 제목 한 줄에 들어갈 만큼 자르기 (한글 기준 약 7자) */
-export function shorten(text: string, max = 7): string {
-	const chars = [...text.trim()];
-	return chars.length <= max ? chars.join("") : chars.slice(0, max - 1).join("") + "…";
-}
 
 interface Inst {
 	key: KeyHandle;
@@ -89,9 +84,8 @@ export class MusicButton {
 		const glyph = isPlay ? (st.state === "playing" ? "pause" : "play") : this.command;
 		if (st.state === "off") return { art: { glyph, badge: true }, title: TITLE_OFF };
 		if (st.state === "denied") return { art: { glyph, warn: true }, title: TITLE_DENIED };
-		if (!isPlay) return { art: { glyph } };
-		if (st.state === "playing") return { art: { glyph }, title: st.track ? shorten(st.track) : undefined };
-		if (st.state === "paused") return { art: { glyph }, title: TITLE_PAUSED };
+		// 재생 중인 ⏯ 은 앨범 표지만 (글자 없음). 표지가 없으면 큰 ❚❚
+		if (isPlay && st.state === "playing" && this.music.artwork) return { art: { glyph }, image: this.music.artwork };
 		return { art: { glyph } };
 	}
 
@@ -101,7 +95,7 @@ export class MusicButton {
 
 	private render(inst: Inst): void {
 		const v = this.view();
-		const image = toDataUrl(keySvg(v.art));
+		const image = v.image ?? toDataUrl(keySvg(v.art));
 		if (image !== inst.lastImage) {
 			inst.lastImage = image;
 			void inst.key.setImage(image);
